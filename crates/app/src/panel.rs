@@ -14,6 +14,7 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{IconName, Sizable as _};
 use vigia_core::date::{self, Date};
 use vigia_core::entity::{self, EntityKind};
+use vigia_core::holidays::{BusinessDays, Country, Shift};
 use vigia_core::model::{Category, Item, ItemId, Kind, Recurrence, State, Unit, leads_text, parse_leads};
 
 pub const PANEL_W: f32 = 380.;
@@ -37,6 +38,7 @@ pub struct EditForm {
     pub recurrence: Recurrence,
     pub auto_renews: bool,
     pub auto_check: bool,
+    pub business_days: Option<BusinessDays>,
     pub name: Entity<InputState>,
     pub owner: Entity<InputState>,
     /// The kind picked for a new owner; `None` until the user picks (then it's guessed).
@@ -97,6 +99,7 @@ impl VigiaApp {
             recurrence: it.recurrence,
             auto_renews: it.auto_renews,
             auto_check: it.auto_check,
+            business_days: it.business_days,
             name,
             owner,
             owner_kind: None,
@@ -186,6 +189,7 @@ impl VigiaApp {
             it.recurrence = f.recurrence;
             it.auto_renews = f.auto_renews;
             it.auto_check = f.auto_check && f.kind.checkable();
+            it.business_days = f.business_days;
             it.name = val(&f.name);
             if it.name.is_empty() {
                 it.name = f.kind.label();
@@ -269,6 +273,9 @@ impl VigiaApp {
             body = body.child(row(i18n::t!("app.field.term"), i18n::tn!("app.field.months", m)));
         }
         body = body.child(row(i18n::t!("app.field.recurrence"), it.recurrence.label()));
+        if let Some(b) = it.business_days {
+            body = body.child(row(i18n::t!("app.field.business_days"), b.label()));
+        }
         if let Some(c) = it.cost {
             body = body.child(row(i18n::t!("app.field.cost"), format!("{} {}", fmt_money(c), it.currency).trim().to_string()));
         }
@@ -600,6 +607,44 @@ impl VigiaApp {
             form = form.child(field(i18n::t!("app.field.notice_days_label"), &f.notice));
         }
         form = form.child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.recurrence"))).child(rec_btn));
+        let cur_b = f.business_days;
+        let weak = cx.entity().downgrade();
+        let set_b = move |w: &WeakEntity<VigiaApp>, b: Option<BusinessDays>, cx: &mut App| {
+            w.update(cx, |this, cx| {
+                if let Some(f) = this.edit.as_mut() {
+                    f.business_days = b;
+                }
+                cx.notify();
+            })
+            .ok();
+        };
+        let shift_label = match cur_b.map(|b| b.shift) {
+            None => i18n::t!("app.edit.biz_none"),
+            Some(Shift::Previous) => i18n::t!("app.edit.biz_prev"),
+            Some(Shift::Next) => i18n::t!("app.edit.biz_next"),
+        };
+        let w0 = weak.clone();
+        let shift_btn = Button::new("form-biz").outline().small().w_full().label(shift_label).dropdown_menu(move |mut menu, _, _| {
+            let default_country = cur_b.and_then(|b| b.country).or(Some(Country::Co));
+            for (lbl, v) in [(i18n::t!("app.edit.biz_none"), None), (i18n::t!("app.edit.biz_prev"), Some(Shift::Previous)), (i18n::t!("app.edit.biz_next"), Some(Shift::Next))] {
+                let w = w0.clone();
+                menu = menu.item(PopupMenuItem::new(lbl).checked(cur_b.map(|b| b.shift) == v).on_click(move |_, _, cx| set_b(&w, v.map(|shift| BusinessDays { shift, country: default_country }), cx)));
+            }
+            menu
+        });
+        let country_btn = cur_b.map(|b| {
+            let w0 = weak.clone();
+            Button::new("form-biz-c").outline().small().w_full().label(b.country.map(|c| c.label()).unwrap_or_else(|| i18n::t!("app.edit.biz_weekends"))).dropdown_menu(move |mut menu, _, _| {
+                let w = w0.clone();
+                menu = menu.item(PopupMenuItem::new(i18n::t!("app.edit.biz_weekends")).checked(b.country.is_none()).on_click(move |_, _, cx| set_b(&w, Some(BusinessDays { country: None, ..b }), cx)));
+                for c in Country::ALL {
+                    let w = w0.clone();
+                    menu = menu.item(PopupMenuItem::new(c.label()).checked(b.country == Some(c)).on_click(move |_, _, cx| set_b(&w, Some(BusinessDays { country: Some(c), ..b }), cx)));
+                }
+                menu
+            })
+        });
+        form = form.child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.business_days"))).child(div().flex().gap(px(8.)).child(div().flex_1().min_w_0().child(shift_btn)).children(country_btn.map(|b| div().flex_1().min_w_0().child(b)))));
         if matches!(kind, Kind::WyomingReport | Kind::CamaraComercio) {
             form = form.child(div().text_size(px(11.)).text_color(t.ink_muted).child(if kind == Kind::WyomingReport { i18n::t!("app.edit.wyoming_hint") } else { i18n::t!("app.edit.camara_hint") }));
         }

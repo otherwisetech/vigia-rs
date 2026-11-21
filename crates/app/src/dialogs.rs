@@ -29,6 +29,7 @@ pub struct SettingsForm {
 pub enum Dialog {
     Renew { id: ItemId, expires: Entity<InputState>, cost: Entity<InputState>, note: Entity<InputState>, _sub: Subscription },
     Delete { id: ItemId, name: String },
+    CalendarUrl { url: Entity<InputState> },
     DeleteEntity { id: vigia_core::entity::EntityId, name: String, items: usize },
     Settings(SettingsForm),
     /// The models must be downloaded before reading an image.
@@ -68,6 +69,13 @@ impl VigiaApp {
             }
             Err(e) => self.toast(e, cx),
         }
+    }
+
+    pub fn ask_calendar_url(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let url = cx.new(|cx| InputState::new(window, cx).placeholder(i18n::t!("app.cal.url_ph")));
+        url.update(cx, |s, cx| s.focus(window, cx));
+        self.dialog = Some(Dialog::CalendarUrl { url });
+        cx.notify();
     }
 
     pub fn ask_delete(&mut self, id: ItemId, cx: &mut Context<Self>) {
@@ -198,6 +206,20 @@ impl VigiaApp {
                 }
                 cx.notify();
             }),
+            Dialog::CalendarUrl { url } => {
+                let b = div().flex().flex_col().gap(px(10.)).child(text(i18n::t!("app.cal.url_body"))).child(Input::new(url).small()).child(text(i18n::t!("app.cal.url_privacy")));
+                (i18n::t!("app.cal.import_url"), b.into_any_element(), i18n::t!("app.cal.add"), false, |this, _, cx| {
+                    if let Some(Dialog::CalendarUrl { url }) = this.dialog.take() {
+                        let u = url.read(cx).value().trim().to_string();
+                        if vigia_core::calendars::is_url(&u) {
+                            this.add_calendar_url(u, cx);
+                        } else {
+                            this.toast(i18n::t!("app.cal.bad_url"), cx);
+                        }
+                    }
+                    cx.notify();
+                })
+            }
             Dialog::DeleteEntity { name, items, .. } => (i18n::t!("app.entity.delete_title"), text(i18n::tn!("app.entity.delete_body", *items, name = name.clone())).into_any_element(), i18n::t!("app.entity.delete"), true, |this, _, cx| {
                 if let Some(Dialog::DeleteEntity { id, .. }) = this.dialog.take() {
                     this.data.update(cx, |d, cx| d.delete_entity(id, cx));

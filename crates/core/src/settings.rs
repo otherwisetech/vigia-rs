@@ -24,6 +24,8 @@ pub struct Settings {
     pub view: Option<String>,
     /// Hour of the day (0–23) after which the daily reminders are sent.
     pub remind_hour: Option<u32>,
+    /// Public holidays shown in the calendar and timeline (`co`, `us`, `us-wy`, …).
+    pub holidays: Option<Vec<String>>,
 }
 
 impl Settings {
@@ -74,6 +76,10 @@ impl Settings {
     pub fn ics_sync(&self) -> bool {
         self.ics_sync == Some(true)
     }
+    pub fn holiday_countries(&self) -> Vec<crate::holidays::Country> {
+        self.holidays.iter().flatten().filter_map(|c| crate::holidays::Country::from_id(c)).collect()
+    }
+
     pub fn remind_hour(&self) -> u32 {
         self.remind_hour.unwrap_or(9).min(23)
     }
@@ -85,10 +91,12 @@ mod tests {
 
     #[test]
     fn roundtrip_and_defaults() {
-        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30) };
+        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30), holidays: Some(vec!["co".into(), "mars".into(), "us-wy".into()]) };
         assert_eq!(Settings::parse(&s.to_json()), s);
         assert!(!s.github_stars() && !s.notify() && !s.tray() && !s.auto_checks() && s.ics_sync());
         assert_eq!(s.remind_hour(), 23);
+        assert_eq!(s.holiday_countries(), vec![crate::holidays::Country::Co, crate::holidays::Country::UsWy]);
+        assert!(Settings::default().holiday_countries().is_empty());
         let d = Settings::default();
         assert!(d.github_stars() && d.notify() && d.tray() && d.auto_checks() && !d.ics_sync());
         assert_eq!(d.remind_hour(), 9);

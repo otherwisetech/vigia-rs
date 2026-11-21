@@ -1,5 +1,6 @@
 //! Vigía's engine, shared by the desktop app and the `vigia` CLI. No UI.
 pub mod backup;
+pub mod calendars;
 pub mod cert;
 pub mod checks;
 pub mod csv;
@@ -9,6 +10,7 @@ pub mod demo;
 pub mod entity;
 pub mod extract;
 pub mod graph;
+pub mod holidays;
 pub mod ics;
 pub mod model;
 pub mod ocr;

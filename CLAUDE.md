@@ -14,16 +14,21 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               (filters, counts, timeline months, calendar grid), quick.rs (quick-add parser),
               extract.rs (dates / numbers / MRZ from document text), ocr.rs (ocrs + PDF text,
               feature `ocr`), rdap.rs + cert.rs (parsers + thin network runners), checks.rs
-              (Checker trait, apply outcomes), csv.rs, ics.rs, backup.rs (zip), settings.rs,
-              paths.rs, demo.rs
+              (Checker trait, apply outcomes), csv.rs, ics.rs (export, parse, RRULE
+              occurrences), backup.rs (zip), settings.rs, paths.rs, demo.rs, entity.rs (owners:
+              kinds, plate / legal-suffix inference, find by name / ident, relations), graph.rs
+              (map layout + camera math, deterministic), holidays.rs (computed public holidays,
+              business-day shift), calendars.rs (read-only .ics overlays)
 crates/i18n   vigia-i18n: embedded translation catalogs, t!/tn!/tv! macros, i18n guard tests
 crates/cli    `vigia`: list / due / show / add / edit / renew / delete / check / export /
-              import / backup / kinds / path, `--json` everywhere
+              import / backup / kinds / entities / entity / relate / holidays / path, `--json`
+              everywhere
 crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, background tick
               (reminders every 30 s, checks hourly), menu-bar pump; state.rs: `Data` entity held
               by the app (not the window) so reminders run with the window closed; app.rs:
               window, top bar + quick add, sidebar, footer, About, file actions, OCR flow;
-              views.rs: dashboard / timeline / calendar / list; panel.rs: item detail + edit
+              views.rs: dashboard / timeline / calendar / list (+ holidays / overlay menu);
+              entities.rs: entity page + form; graph.rs: the map canvas; panel.rs: item detail + edit
               form; dialogs.rs: renew, delete, settings, OCR; macos.rs: NSStatusItem (from
               expense-rs); system.rs: notifications, launch at login; star.rs: GitHub star
               (from rama / nodo)
@@ -40,7 +45,8 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   (never edit a shipped one) plus a test. Attachments are copied (never moved) into
   `vigia-files/<item id>/` and referenced by relative `/`-separated paths.
 - **Network only for opt-in checks.** RDAP and TLS run for items with `auto_check`, daily while
-  the app runs (or `vigia check`). The OCR models are downloaded only after the user confirms.
+  the app runs (or `vigia check`). A calendar URL is downloaded only when the user adds or
+  refreshes it. The OCR models are downloaded only after the user confirms.
   The star count is the only other request (once a day, off switch). Tests never touch the
   network: parsers run on fixtures in `crates/core/tests/fixtures`, checks through the `Checker`
   trait's fakes.

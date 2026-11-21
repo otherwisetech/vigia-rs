@@ -23,9 +23,24 @@ engine, for scripts and AI agents.
   Colombia), RUT updates; memberships; vaccines and check-ups; gas inspection, fire extinguisher;
   or anything custom. Each type sets sensible reminder lead times (a passport starts 9 months
   ahead, because many countries want 6 months of validity), a recurrence and its category.
-- Every item: name, whose it is (person, company, car), category, issue and expiry dates or a
+- Every item: name, **who or what it belongs to**, category, issue and expiry dates or a
   recurrence rule, cost and currency, provider, reference number, renewal link, auto-renews,
-  tags, notes, **attachments** (scans, PDFs, photos) and a **renewal history**.
+  tags, notes, **attachments** (scans, PDFs, photos), a **renewal history**, and optionally a
+  **business-day rule** (a deadline on a weekend or public holiday moves to the business day
+  before or after; Cámara de Comercio and RUT default to the Colombian business day before).
+- **Belongs to: people, vehicles, companies, properties, pets, digital accounts.** Each owner is
+  an entity with a kind and its own fields (plate, make and model, year; tax id and country;
+  address). The kind is guessed — a plate (`ABC123`, `ABC12D`, `7ABC123`) means a vehicle, a
+  legal suffix (LLC, Inc., S.A.S.) a company, a domain a digital asset — and templates suggest
+  one (SOAT → vehicle, Wyoming report → company, passport → person); you can always change it.
+  The sidebar groups them (People, Vehicles, Companies, Properties, Digital…), each with its
+  count and a dot coloured by its most urgent item; an entity's page lists its items, coming
+  deadlines, renewal history, files and **links** to other entities (Juan → owner of Otherwise
+  SAS, member of Otherwise Technologies LLC, owner of the Mazda), and can keep a **live .ics
+  file** of just its deadlines.
+- **Map**: entities and their items on a pan / zoom canvas, links drawn between them, rings
+  coloured by the worst status (expired, ≤ 30 days, OK). Layered (people → companies → assets →
+  items) or around one entity; drag from one node onto another to link them, click to open.
 - **Reminders**: per-item lead times (default 90 / 30 / 7 / 1 days) plus the day itself, as
   system notifications while Vigía runs. On macOS a **menu-bar item** shows the next deadlines
   and a badge of what needs attention, and keeps Vigía running (and reminding) when the window is
@@ -40,11 +55,17 @@ engine, for scripts and AI agents.
 - **Views**: a **dashboard** (counts by urgency, the next 5, the reminders coming in the next 30
   days, what was sent, the automatic checks), a **timeline** of the next 12 months grouped by
   month and coloured by urgency, a **calendar** month view, and a **list** with filters by
-  person, category and status (expired / ≤ 30 days / ≤ 90 days / OK) plus search.
+  owner (or kind of owner), category and status (expired / ≤ 30 days / ≤ 90 days / OK) plus search.
 - **Quick add** with natural dates: `Pasaporte @Ana 12/05/2031`, `SOAT moto en 3 meses`,
   `example.com 2027-08-13`, `SSL api.example.com vence el 15 mar 2027`, `Passeport Luc dans 2
-  ans`. The type is guessed from keywords in four languages, `@name` is the owner, and a domain
-  name becomes a domain item with its host filled in.
+  ans`, `SOAT #ABC123 en 3 meses`, `RUT @"Otherwise SAS"`. The type is guessed from keywords in
+  four languages; `@Ana`, `@"Mazda ABC123"` or `#ABC123` names the owner (matched to an
+  existing one by name, plate or tax id, else created with a guessed kind), and a domain name
+  becomes a domain item with its host filled in.
+- **Public holidays and other calendars**: computed holidays for Colombia (Ley Emiliani and the
+  Easter-based days), the US (federal), Wyoming, Spain, Mexico, Brazil and Canada, switched on
+  per country, in the calendar and the timeline. Any **.ics file or URL** (a Google public
+  holiday calendar, a team calendar) can be added as a read-only overlay and refreshed.
 - **Read a document (OCR, optional, local)**: drop a photo, scan or PDF and Vigía reads the
   expiry date, issue date and document number to prefill the item — passports and ID cards from
   their machine-readable zone with check digits. Images are read with
@@ -86,11 +107,17 @@ vigia renew 7 --expires 2036-05-12 --cost 420000 --note "consulado"
 vigia check --all                     # RDAP / TLS checks of the items that opted in
 vigia export ics vigia.ics            # or csv; import FILE.csv; backup FILE.zip
 vigia kinds                           # types, categories and default reminders
+vigia entities --kind vehicle         # people, vehicles, companies… with their item counts
+vigia entity "Otherwise SAS"          # details, links and items; --name/--kind/--ident… to edit
+vigia relate Juan "Otherwise SAS" --role owner
+vigia holidays --country co --year 2026
 ```
 
-JSON items carry `id`, `kind`, `name`, `owner`, `category`, `issued`, `expires`, `due` (the day
+JSON items carry `id`, `kind`, `name`, `owner`, `owner_kind`, `entity_id`, `category`, `issued`, `expires`, `due` (the day
 to act: the expiry, or the notice deadline of a contract), `days_left`, `status`, `state`,
-`recurrence`, cost, provider, reference, tags, lead days, host and check results.
+`recurrence`, `business_days`, cost, provider, reference, tags, lead days, host and check
+results. CSV has `owner_kind` and `business_days` columns; .ics events name the owner and its
+kind.
 
 ## Privacy
 

@@ -13,6 +13,7 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{IconName, Sizable as _};
 use vigia_core::date::{self, Date};
 use vigia_core::model::{Category, Item, State, Status};
+use vigia_core::settings::Settings;
 
 /// `12 de mayo de 2031` / `May 12, 2031`.
 pub fn long_date(d: Date) -> String {
@@ -47,6 +48,120 @@ fn weekday(i: usize) -> String {
 }
 
 impl VigiaApp {
+    /// Holiday names (true) and other calendars' events (false) per day, `from`..=`to`.
+    pub fn day_marks(&self, from: Date, to: Date, cx: &App) -> std::collections::BTreeMap<Date, Vec<(String, bool)>> {
+        let mut m: std::collections::BTreeMap<Date, Vec<(String, bool)>> = std::collections::BTreeMap::new();
+        let many = self.holidays.len() > 1;
+        for h in vigia_core::holidays::between(&self.holidays, from, to) {
+            let name = if many { i18n::t!("app.cal.holiday_in", name = h.name, country = h.country.id().to_uppercase()) } else { h.name.to_string() };
+            m.entry(h.date).or_default().push((name, true));
+        }
+        for o in vigia_core::calendars::overlay(&self.data.read(cx).calendars, from, to) {
+            m.entry(o.date).or_default().push((o.summary, false));
+        }
+        m
+    }
+
+    /// Holidays per country, other calendars, import.
+    pub fn calendars_button(&self, t: &Tokens, cx: &mut Context<Self>) -> AnyElement {
+        let _ = t;
+        let on = self.holidays.clone();
+        let cals: Vec<(i64, String, bool, bool)> = self.data.read(cx).calendars.iter().map(|c| (c.id, c.name.clone(), c.enabled, c.is_url())).collect();
+        let weak = cx.entity().downgrade();
+        Button::new("calendars").outline().small().icon(IconName::Calendar).label(i18n::t!("app.cal.calendars")).dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+            menu = menu.label(i18n::t!("app.cal.holidays"));
+            for c in vigia_core::holidays::Country::ALL {
+                let w = weak.clone();
+                let checked = on.contains(&c);
+                menu = menu.item(PopupMenuItem::new(c.label()).checked(checked).on_click(move |_, _, cx| {
+                    w.update(cx, |this, cx| this.toggle_holidays(c, cx)).ok();
+                }));
+            }
+            if !cals.is_empty() {
+                menu = menu.separator().label(i18n::t!("app.cal.others"));
+                for (id, name, enabled, _) in &cals {
+                    let (w, id, enabled) = (weak.clone(), *id, *enabled);
+                    menu = menu.item(PopupMenuItem::new(name.clone()).checked(enabled).on_click(move |_, _, cx| {
+                        w.update(cx, |this, cx| this.data.update(cx, |d, cx| d.set_calendar_enabled(id, !enabled, cx))).ok();
+                    }));
+                }
+                let w = weak.clone();
+                menu = menu.item(PopupMenuItem::new(i18n::t!("app.cal.refresh")).on_click(move |_, _, cx| {
+                    w.update(cx, |this, cx| this.refresh_calendars(cx)).ok();
+                }));
+                for (id, name, _, _) in &cals {
+                    let (w, id) = (weak.clone(), *id);
+                    menu = menu.item(PopupMenuItem::new(i18n::t!("app.cal.remove", name = name.clone())).on_click(move |_, _, cx| {
+                        w.update(cx, |this, cx| this.data.update(cx, |d, cx| d.remove_calendar(id, cx))).ok();
+                    }));
+                }
+            }
+            let (w1, w2) = (weak.clone(), weak.clone());
+            menu.separator()
+                .item(PopupMenuItem::new(i18n::t!("app.cal.import_file")).on_click(move |_, window, cx| {
+                    w1.update(cx, |this, cx| this.import_calendar_file(window, cx)).ok();
+                }))
+                .item(PopupMenuItem::new(i18n::t!("app.cal.import_url")).on_click(move |_, window, cx| {
+                    w2.update(cx, |this, cx| this.ask_calendar_url(window, cx)).ok();
+                }))
+        })
+        .into_any_element()
+    }
+
+    fn toggle_holidays(&mut self, c: vigia_core::holidays::Country, cx: &mut Context<Self>) {
+        if let Some(i) = self.holidays.iter().position(|x| *x == c) {
+            self.holidays.remove(i);
+        } else {
+            self.holidays.push(c);
+            self.holidays.sort();
+        }
+        let ids: Vec<String> = self.holidays.iter().map(|c| c.id().to_string()).collect();
+        Settings::update(|s| s.holidays = (!ids.is_empty()).then_some(ids));
+        cx.notify();
+    }
+
+    fn import_calendar_file(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let rx = cx.prompt_for_paths(PathPromptOptions { files: true, directories: false, multiple: false, prompt: Some(i18n::t!("app.cal.import_file").into()) });
+        cx.spawn_in(window, async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = rx.await
+                && let Some(p) = paths.into_iter().next()
+            {
+                this.update(cx, |this, cx| match this.data.update(cx, |d, cx| d.add_calendar_file(&p, cx)) {
+                    Ok(name) => this.toast(i18n::t!("app.cal.added", name = name), cx),
+                    Err(e) => this.toast(e, cx),
+                })
+                .ok();
+            }
+        })
+        .detach();
+    }
+
+    pub fn add_calendar_url(&mut self, url: String, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        self.toast(i18n::t!("app.cal.downloading"), cx);
+        self.data.update(cx, |d, cx| {
+            d.add_calendar_url(url, None, cx, move |r, cx| {
+                weak.update(cx, |this, cx| match r {
+                    Ok(name) => this.toast(i18n::t!("app.cal.added", name = name), cx),
+                    Err(e) => this.toast(e, cx),
+                })
+                .ok();
+            })
+        });
+    }
+
+    fn refresh_calendars(&mut self, cx: &mut Context<Self>) {
+        let weak = cx.entity().downgrade();
+        self.data.update(cx, |d, cx| {
+            d.refresh_calendars(cx, move |r, cx| {
+                if let Err(e) = r {
+                    weak.update(cx, |this, cx| this.toast(e, cx)).ok();
+                }
+            })
+        });
+        self.toast(i18n::t!("app.cal.refreshed"), cx);
+    }
+
     /// One item as a row: urgency bar, name and owner, type, due date and time left.
     pub fn item_row(&self, t: &Tokens, it: &Item, today: Date, key: impl Into<ElementId>, cx: &mut Context<Self>) -> Stateful<Div> {
         let status = it.status(today);
@@ -256,7 +371,8 @@ impl VigiaApp {
         }
         let refs: Vec<&Item> = items.iter().filter(|i| i.state != State::Archived).collect();
         let (overdue, months) = vigia_core::view::timeline(&refs, today, 12);
-        let mut col = Self::scroll_col("timeline").child(Self::heading(t, i18n::t!("app.view.timeline"), Some(i18n::t!("app.timeline.sub"))));
+        let marks = self.day_marks(today, date::add_months(date::month_start(today), 12), cx);
+        let mut col = Self::scroll_col("timeline").child(div().flex().items_center().child(div().flex_1().child(Self::heading(t, i18n::t!("app.view.timeline"), Some(i18n::t!("app.timeline.sub"))))).child(self.calendars_button(t, cx)));
         let day_badge = |d: Date, color: Hsla| div().flex().flex_col().items_center().justify_center().w(px(46.)).flex_none().child(div().text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).text_color(color).child(d.day().to_string())).child(div().text_size(px(10.5)).text_color(t.ink_muted).child(weekday(d.weekday().num_days_from_monday() as usize)));
         if !overdue.is_empty() {
             col = col.child(div().flex().items_center().gap(px(8.)).pt(px(8.)).child(icon(IconName::TriangleAlert, 14., t.danger)).child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).text_color(t.danger).child(i18n::tn!("app.timeline.overdue", overdue.len()))));
@@ -267,6 +383,11 @@ impl VigiaApp {
         }
         for (m, month) in months.iter().enumerate() {
             col = col.child(div().flex().items_baseline().gap(px(8.)).pt(px(12.)).pb(px(2.)).border_b_1().border_color(t.border).child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(month_title(month.start))).child(div().text_size(px(12.)).text_color(t.ink_muted).child(if month.items.is_empty() { i18n::t!("app.timeline.nothing") } else { i18n::tn!("app.items.count", month.items.len()) })));
+            let end = date::add_months(month.start, 1);
+            let in_month: Vec<String> = marks.iter().filter(|(d, _)| **d >= month.start && **d < end).flat_map(|(d, v)| v.iter().map(move |(name, _)| i18n::t!("app.timeline.day_mark", day = d.day(), name = name.clone()))).collect();
+            if !in_month.is_empty() {
+                col = col.child(div().flex().flex_wrap().gap_x(px(12.)).gap_y(px(2.)).text_size(px(11.5)).text_color(t.ink_muted).children(in_month.into_iter().map(|m| div().child(m))));
+            }
             for (k, it) in month.items.iter().enumerate() {
                 let d = it.due_date(today).unwrap_or(today);
                 let color = t.status(it.status(today));
@@ -285,6 +406,8 @@ impl VigiaApp {
         let items = self.data.read(cx).items.clone();
         let refs: Vec<&Item> = items.iter().filter(|i| i.state != State::Archived).collect();
         let grid = vigia_core::view::month_grid(&refs, self.cal_month, today);
+        let marks = self.day_marks(grid[0].0, grid[41].0, cx);
+        let cal_btn = self.calendars_button(t, cx);
         let month = self.cal_month;
         let nav = |id: &'static str, ic: IconName, delta: i32| {
             ui::icon_button(t, id, ic, true).on_click(cx.listener(move |this, _, _, cx| {
@@ -297,6 +420,7 @@ impl VigiaApp {
             .items_center()
             .gap(px(6.))
             .child(div().flex_1().child(Self::heading(t, month_title(month), None)))
+            .child(cal_btn)
             .child(nav("cal-prev", IconName::ChevronLeft, -1))
             .child(ui::outline_button(t, "cal-today").child(i18n::t!("app.calendar.today")).on_click(cx.listener(|this, _, _, cx| {
                 this.cal_month = date::month_start(Data::today());
@@ -312,7 +436,12 @@ impl VigiaApp {
                 let in_month = day.month() == month.month();
                 let is_today = *day == today;
                 let mut cell = div().flex().flex_col().gap(px(3.)).flex_1().min_w_0().p(px(6.)).border_r_1().border_b_1().border_color(t.border).bg(if in_month { t.surface } else { t.canvas });
-                cell = cell.child(div().flex().child(div().px(px(5.)).rounded(px(6.)).text_size(px(12.)).when(is_today, |d| d.bg(t.accent).text_color(t.on_fill()).font_weight(FontWeight::SEMIBOLD)).when(!is_today && !in_month, |d| d.text_color(t.ink_muted.opacity(0.6))).child(day.day().to_string())));
+                let day_marks = marks.get(day).cloned().unwrap_or_default();
+                let holiday = day_marks.iter().any(|(_, h)| *h);
+                cell = cell.child(div().flex().child(div().px(px(5.)).rounded(px(6.)).text_size(px(12.)).when(holiday && !is_today, |d| d.text_color(t.danger).font_weight(FontWeight::SEMIBOLD)).when(is_today, |d| d.bg(t.accent).text_color(t.on_fill()).font_weight(FontWeight::SEMIBOLD)).when(!is_today && !in_month, |d| d.text_color(t.ink_muted.opacity(0.6))).child(day.day().to_string())));
+                for (name, h) in day_marks.iter().take(2) {
+                    cell = cell.child(div().text_size(px(10.)).truncate().text_color(if *h { t.danger.opacity(0.85) } else { t.ink_muted }).child(name.clone()));
+                }
                 for (k, it) in list.iter().take(3).enumerate() {
                     let color = t.status(it.status(today));
                     let id = it.id;

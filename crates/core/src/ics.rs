@@ -117,6 +117,10 @@ pub struct Event {
     pub start: Option<Date>,
     /// Alarm offsets in days before the start.
     pub alarms: Vec<u32>,
+    /// `FREQ=YEARLY;BYMONTH=11;BYDAY=4TH`, as written.
+    pub rrule: String,
+    /// Last day (inclusive) of a multi-day all-day event.
+    pub last: Option<Date>,
 }
 
 pub fn parse(s: &str) -> Vec<Event> {
@@ -159,9 +163,104 @@ pub fn parse(s: &str) -> Vec<Event> {
             "SUMMARY" => e.summary = unescape(value),
             "DESCRIPTION" => e.description = unescape(value),
             "DTSTART" => e.start = chrono::NaiveDate::parse_from_str(value.get(..8).unwrap_or(value), "%Y%m%d").ok(),
+            // DTEND of an all-day event is exclusive
+            "DTEND" => e.last = chrono::NaiveDate::parse_from_str(value.get(..8).unwrap_or(value), "%Y%m%d").ok().map(|d| if value.len() == 8 { date::add_days(d, -1) } else { d }),
+            "RRULE" => e.rrule = value.trim().to_string(),
             _ => {}
         }
     }
+    out
+}
+
+fn rule_part<'a>(rule: &'a str, key: &str) -> Option<&'a str> {
+    rule.split(';').filter_map(|p| p.split_once('=')).find(|(k, _)| k.eq_ignore_ascii_case(key)).map(|(_, v)| v)
+}
+
+/// `4TH` → (4, Thursday), `-1MO` → (-1, Monday), `MO` → (0, Monday).
+fn by_day(s: &str) -> Option<(i32, chrono::Weekday)> {
+    use chrono::Weekday::*;
+    let s = s.trim().to_ascii_uppercase();
+    let (n, wd) = s.split_at(s.len().checked_sub(2)?);
+    let wd = match wd {
+        "MO" => Mon,
+        "TU" => Tue,
+        "WE" => Wed,
+        "TH" => Thu,
+        "FR" => Fri,
+        "SA" => Sat,
+        "SU" => Sun,
+        _ => return None,
+    };
+    Some((if n.is_empty() || n == "+" { 0 } else { n.trim_start_matches('+').parse().ok()? }, wd))
+}
+
+fn nth_weekday(y: i32, m: u32, n: i32, wd: chrono::Weekday) -> Option<Date> {
+    use chrono::Datelike;
+    let days: Vec<Date> = (1..=date::last_day(y, m)).filter_map(|d| date::ymd(y, m, d)).filter(|d| d.weekday() == wd).collect();
+    if n > 0 { days.get(n as usize - 1).copied() } else { days.iter().rev().nth((-n) as usize - 1).copied() }
+}
+
+/// The days an event happens on between `from` and `to` (inclusive): its start (and the rest
+/// of a multi-day event), repeated by a yearly, monthly or weekly RRULE (INTERVAL, COUNT,
+/// UNTIL, and yearly BYMONTH + BYDAY like `4TH`).
+pub fn occurrences(e: &Event, from: Date, to: Date) -> Vec<Date> {
+    use chrono::Datelike;
+    let Some(start) = e.start else { return Vec::new() };
+    let span = e.last.map_or(0, |l| date::days_between(start, l).clamp(0, 60));
+    let mut starts: Vec<Date> = Vec::new();
+    let rule = e.rrule.as_str();
+    let freq = rule_part(rule, "FREQ").map(|f| f.to_ascii_uppercase());
+    let interval: i32 = rule_part(rule, "INTERVAL").and_then(|v| v.parse().ok()).filter(|n| *n > 0).unwrap_or(1);
+    let count: Option<usize> = rule_part(rule, "COUNT").and_then(|v| v.parse().ok());
+    let until = rule_part(rule, "UNTIL").and_then(|v| chrono::NaiveDate::parse_from_str(v.get(..8)?, "%Y%m%d").ok());
+    let end = until.map_or(to, |u| u.min(to));
+    match freq.as_deref() {
+        Some("YEARLY") => {
+            let month: u32 = rule_part(rule, "BYMONTH").and_then(|v| v.parse().ok()).unwrap_or(start.month());
+            let byday = rule_part(rule, "BYDAY").and_then(by_day).filter(|(n, _)| *n != 0);
+            let mut y = start.year();
+            while y <= end.year() {
+                let d = match byday {
+                    Some((n, wd)) => nth_weekday(y, month, n, wd),
+                    None => date::ymd(y, month, start.day().min(date::last_day(y, month))),
+                };
+                if let Some(d) = d.filter(|d| *d >= start) {
+                    starts.push(d);
+                }
+                if count.is_some_and(|c| starts.len() >= c) {
+                    break;
+                }
+                y += interval;
+            }
+        }
+        Some("MONTHLY") => {
+            let mut k = 0;
+            loop {
+                let d = date::add_months(start, k * interval);
+                if d > end || count.is_some_and(|c| starts.len() >= c) {
+                    break;
+                }
+                starts.push(d);
+                k += 1;
+            }
+        }
+        Some("WEEKLY") | Some("DAILY") => {
+            let step = if freq.as_deref() == Some("WEEKLY") { 7 } else { 1 } * interval as i64;
+            // jump close to `from` instead of walking from a start decades back
+            let skip = if count.is_none() && from > start { (date::days_between(start, from) - span).max(0) / step } else { 0 };
+            let mut d = date::add_days(start, skip * step);
+            let mut n = skip as usize;
+            while d <= end && count.is_none_or(|c| n < c) {
+                starts.push(d);
+                d = date::add_days(d, step);
+                n += 1;
+            }
+        }
+        _ => starts.push(start),
+    }
+    let mut out: Vec<Date> = starts.into_iter().filter(|d| *d <= end).flat_map(|s| (0..=span).map(move |k| date::add_days(s, k))).filter(|d| *d >= from && *d <= to).collect();
+    out.sort();
+    out.dedup();
     out
 }
 
@@ -203,5 +302,22 @@ mod tests {
         assert!(ev[0].summary.contains("Pasaporte") && ev[0].summary.contains("Ana"));
         // contracts: the event is on the notice deadline
         assert_eq!(ev[1].start, ymd(2026, 12, 2));
+    }
+
+    #[test]
+    fn recurring_events() {
+        let text = "BEGIN:VCALENDAR\r\nX-WR-CALNAME:Festivos\r\nBEGIN:VEVENT\r\nUID:a\r\nSUMMARY:Navidad\r\nDTSTART;VALUE=DATE:20201225\r\nDTEND;VALUE=DATE:20201226\r\nRRULE:FREQ=YEARLY\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:b\r\nSUMMARY:Thanksgiving\r\nDTSTART;VALUE=DATE:20211125\r\nRRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=4TH\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:c\r\nSUMMARY:Feria\r\nDTSTART;VALUE=DATE:20260803\r\nDTEND;VALUE=DATE:20260806\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:d\r\nSUMMARY:Junta\r\nDTSTART:20260105T140000Z\r\nRRULE:FREQ=MONTHLY;INTERVAL=3;COUNT=3\r\nEND:VEVENT\r\nBEGIN:VEVENT\r\nUID:e\r\nSUMMARY:Gym\r\nDTSTART;VALUE=DATE:20200106\r\nRRULE:FREQ=WEEKLY;UNTIL=20261130\r\nEND:VEVENT\r\nEND:VCALENDAR\r\n";
+        let ev = parse(text);
+        assert_eq!(ev.len(), 5);
+        let (from, to) = (ymd(2026, 1, 1).unwrap(), ymd(2027, 12, 31).unwrap());
+        let iso = |v: Vec<Date>| v.into_iter().map(date::iso).collect::<Vec<_>>();
+        assert_eq!(iso(occurrences(&ev[0], from, to)), ["2026-12-25", "2027-12-25"]);
+        assert_eq!(iso(occurrences(&ev[1], from, to)), ["2026-11-26", "2027-11-25"]);
+        assert_eq!(iso(occurrences(&ev[2], from, to)), ["2026-08-03", "2026-08-04", "2026-08-05"]);
+        assert_eq!(iso(occurrences(&ev[3], from, to)), ["2026-01-05", "2026-04-05", "2026-07-05"]);
+        let gym = occurrences(&ev[4], ymd(2026, 11, 1).unwrap(), to);
+        assert_eq!(iso(gym), ["2026-11-02", "2026-11-09", "2026-11-16", "2026-11-23", "2026-11-30"]);
+        assert_eq!(occurrences(&ev[0], ymd(2019, 1, 1).unwrap(), ymd(2019, 12, 31).unwrap()), Vec::<Date>::new());
+        assert_eq!(super::by_day("-1MO"), Some((-1, chrono::Weekday::Mon)));
     }
 }

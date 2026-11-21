@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use vigia_core::date::{self, Date};
 use vigia_core::db::{self, Store};
+use vigia_core::calendars::Calendar;
 use vigia_core::entity::{Entity as Ent, EntityId, Relation, Role};
 use vigia_core::model::{Item, ItemId, State};
 use vigia_core::settings::Settings;
@@ -18,12 +19,17 @@ pub struct Data {
     pub items: Vec<Item>,
     pub entities: Vec<Ent>,
     pub relations: Vec<Relation>,
+    pub calendars: Vec<Calendar>,
+    /// Entities with a live .ics file kept up to date: (entity, file).
+    pub live_ics: Vec<(EntityId, PathBuf)>,
     pub attach_counts: HashMap<ItemId, usize>,
     pub generation: u64,
     pub checking: HashSet<ItemId>,
     /// Reminders sent this session, newest first: (item, title, body).
     pub recent: Vec<(ItemId, String, String)>,
 }
+
+const LIVE_ICS: &str = "live_ics:";
 
 pub struct Shared(pub Entity<Data>);
 
@@ -35,7 +41,7 @@ pub fn data(cx: &App) -> Entity<Data> {
 
 impl Data {
     pub fn open(path: PathBuf, temporary: bool) -> Data {
-        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new() };
+        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), calendars: Vec::new(), live_ics: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new() };
         match Store::open_or_create(&path) {
             Ok(s) => {
                 d.store = Some(s);
@@ -58,6 +64,8 @@ impl Data {
         }
         self.entities = s.entities().unwrap_or_default();
         self.relations = s.relations().unwrap_or_default();
+        self.calendars = s.calendars().unwrap_or_default();
+        self.live_ics = s.metas(LIVE_ICS).unwrap_or_default().into_iter().filter_map(|(k, v)| Some((k.strip_prefix(LIVE_ICS)?.parse().ok()?, PathBuf::from(v)))).collect();
         self.attach_counts = s.attachment_counts().unwrap_or_default();
         self.generation += 1;
     }
@@ -90,6 +98,81 @@ impl Data {
         s.relate(from, to, role).map_err(|e| e.to_string())?;
         self.changed(cx);
         Ok(())
+    }
+
+    /// Keeps (or stops keeping) `path` up to date with the entity's items.
+    pub fn set_live_ics(&mut self, entity: EntityId, path: Option<PathBuf>, cx: &mut Context<Self>) {
+        let Some(s) = &self.store else { return };
+        let key = format!("{LIVE_ICS}{entity}");
+        let _ = match &path {
+            Some(p) => s.set_meta(&key, &p.display().to_string()),
+            None => s.delete_meta(&key),
+        };
+        self.changed(cx);
+    }
+
+    // ── other calendars ──────────────────────────────────────────────────────────────────────
+
+    pub fn add_calendar_file(&mut self, path: &Path, cx: &mut Context<Self>) -> Result<String, String> {
+        let body = vigia_core::calendars::read_file(path)?;
+        let fallback = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let c = Calendar { name: vigia_core::calendars::name_of(&body, &fallback), source: path.display().to_string(), body, fetched: Some(db::now_secs()), enabled: true, id: 0 };
+        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
+        s.save_calendar(&c).map_err(|e| e.to_string())?;
+        self.changed(cx);
+        Ok(c.name)
+    }
+
+    /// Downloads in the background; `done` gets the calendar's name or the error.
+    pub fn add_calendar_url(&mut self, url: String, existing: Option<i64>, cx: &mut Context<Self>, done: impl FnOnce(Result<String, String>, &mut App) + 'static) {
+        let u = url.clone();
+        let task = cx.background_executor().spawn(async move { vigia_core::calendars::download(&u) });
+        cx.spawn(async move |this, cx| {
+            let body = task.await;
+            let r = this.update(cx, |this, cx| -> Result<String, String> {
+                let body = body?;
+                let prev = existing.and_then(|id| this.calendars.iter().find(|c| c.id == id).cloned());
+                let fallback = url.split('/').next_back().unwrap_or(&url).trim_end_matches(".ics").to_string();
+                let c = match prev {
+                    Some(p) => Calendar { body, fetched: Some(db::now_secs()), ..p },
+                    None => Calendar { id: 0, name: vigia_core::calendars::name_of(&body, &fallback), source: url.clone(), body, fetched: Some(db::now_secs()), enabled: true },
+                };
+                let s = this.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
+                s.save_calendar(&c).map_err(|e| e.to_string())?;
+                this.changed(cx);
+                Ok(c.name)
+            });
+            let r = r.unwrap_or_else(|e| Err(e.to_string()));
+            cx.update(|cx| done(r, cx));
+        })
+        .detach();
+    }
+
+    /// Reads each calendar again from its file or URL.
+    pub fn refresh_calendars(&mut self, cx: &mut Context<Self>, done: impl Fn(Result<String, String>, &mut App) + Clone + 'static) {
+        for c in self.calendars.clone() {
+            if c.is_url() {
+                self.add_calendar_url(c.source.clone(), Some(c.id), cx, done.clone());
+            } else if let Some(s) = &self.store {
+                let r = vigia_core::calendars::read_file(Path::new(&c.source)).and_then(|body| s.save_calendar(&Calendar { body, fetched: Some(db::now_secs()), ..c.clone() }).map(|_| c.name.clone()).map_err(|e| e.to_string()));
+                done(r, cx);
+            }
+        }
+        self.changed(cx);
+    }
+
+    pub fn set_calendar_enabled(&mut self, id: i64, on: bool, cx: &mut Context<Self>) {
+        if let (Some(s), Some(c)) = (&self.store, self.calendars.iter().find(|c| c.id == id)) {
+            let _ = s.save_calendar(&Calendar { enabled: on, ..c.clone() });
+        }
+        self.changed(cx);
+    }
+
+    pub fn remove_calendar(&mut self, id: i64, cx: &mut Context<Self>) {
+        if let Some(s) = &self.store {
+            let _ = s.delete_calendar(id);
+        }
+        self.changed(cx);
     }
 
     pub fn unrelate(&mut self, id: i64, cx: &mut Context<Self>) {
@@ -287,6 +370,11 @@ impl Data {
 
     /// Rewrites the subscribed calendar file when that's on.
     pub fn sync_ics(&self) {
+        // per-entity files were asked for on this database, so they follow it
+        for (id, p) in &self.live_ics {
+            let mine: Vec<Item> = self.items.iter().filter(|i| i.entity == Some(*id)).cloned().collect();
+            write_ics(p, &mine);
+        }
         if self.temporary || !Settings::load().ics_sync() {
             return;
         }

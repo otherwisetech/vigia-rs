@@ -240,6 +240,11 @@ impl Kind {
         }
     }
 
+    /// Colombian filings are due by a business day: an off day moves the deadline earlier.
+    pub fn business_days(self) -> Option<crate::holidays::BusinessDays> {
+        matches!(self, Kind::CamaraComercio | Kind::Rut).then_some(crate::holidays::BusinessDays { shift: crate::holidays::Shift::Previous, country: Some(crate::holidays::Country::Co) })
+    }
+
     /// Whether this type can be checked automatically over the network.
     pub fn checkable(self) -> bool {
         matches!(self, Kind::Domain | Kind::Certificate)
@@ -458,6 +463,8 @@ pub struct Item {
     pub entity: Option<crate::entity::EntityId>,
     /// The entity's kind as loaded; on save, the kind for a new entity when `entity` is `None`.
     pub owner_kind: Option<crate::entity::EntityKind>,
+    /// A due date on a weekend / holiday moves to the business day before or after.
+    pub business_days: Option<crate::holidays::BusinessDays>,
     pub category: Category,
     pub issued: Option<Date>,
     /// The expiry / due date currently in force.
@@ -493,7 +500,7 @@ pub struct Item {
 impl Item {
     /// A new item with the type's defaults.
     pub fn new(kind: Kind, name: impl Into<String>) -> Item {
-        Item { kind, name: name.into(), category: kind.category(), recurrence: kind.recurrence(), lead_days: kind.lead_days(), term_months: if kind == Kind::Warranty { Some(12) } else { None }, ..Default::default() }
+        Item { kind, name: name.into(), category: kind.category(), recurrence: kind.recurrence(), lead_days: kind.lead_days(), business_days: kind.business_days(), term_months: if kind == Kind::Warranty { Some(12) } else { None }, ..Default::default() }
     }
 
     /// The end of validity: the stored expiry, else purchase + warranty months, else the next
@@ -511,10 +518,11 @@ impl Item {
     /// The day something must be done: the end date, minus the notice period for contracts.
     pub fn due_date(&self, today: Date) -> Option<Date> {
         let end = self.end_date(today)?;
-        Some(match self.notice_days {
+        let due = match self.notice_days {
             Some(n) if n > 0 => date::add_days(end, -(n as i64)),
             _ => end,
-        })
+        };
+        Some(self.business_days.map_or(due, |b| b.apply(due)))
     }
 
     pub fn days_left(&self, today: Date) -> Option<i64> {
@@ -648,8 +656,14 @@ mod tests {
         let wy = Item { recurrence: Recurrence::Wyoming { month: 2 }, ..Item::new(Kind::WyomingReport, "Otherwise Technologies LLC") };
         assert_eq!(wy.due_date(today), Some(d(2027, 2, 1)));
         assert_eq!(wy.status(today), Status::Upcoming);
-        let cc = Item::new(Kind::CamaraComercio, "Matrícula");
+        let mut cc = Item::new(Kind::CamaraComercio, "Matrícula");
         assert_eq!(cc.due_date(today), Some(d(2027, 3, 31)));
+        assert_eq!(Item::new(Kind::Passport, "p").business_days, None);
+        // March 31 2029 is a Saturday and the 29th / 30th are Holy Thursday and Good Friday
+        cc.expires = Some(d(2029, 3, 31));
+        cc.business_days = Some(crate::holidays::BusinessDays { shift: crate::holidays::Shift::Previous, country: Some(crate::holidays::Country::Co) });
+        assert_eq!(cc.due_date(today), Some(d(2029, 3, 28)));
+        assert_eq!(cc.end_date(today), Some(d(2029, 3, 31)));
         let mut p = Item::new(Kind::Passport, "Pasaporte");
         assert_eq!(p.status(today), Status::Undated);
         p.expires = Some(d(2026, 11, 19));

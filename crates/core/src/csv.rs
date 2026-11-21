@@ -4,7 +4,7 @@ use crate::date;
 use crate::model::*;
 
 pub const COLUMNS: &[&str] = &[
-    "id", "kind", "name", "owner", "category", "issued", "expires", "recurrence", "term_months", "notice_days", "cost", "currency", "provider", "reference", "renewal_url", "auto_renews", "tags", "lead_days", "state", "host", "auto_check", "notes", "owner_kind",
+    "id", "kind", "name", "owner", "category", "issued", "expires", "recurrence", "term_months", "notice_days", "cost", "currency", "provider", "reference", "renewal_url", "auto_renews", "tags", "lead_days", "state", "host", "auto_check", "notes", "owner_kind", "business_days",
 ];
 
 fn quote(s: &str) -> String {
@@ -43,6 +43,7 @@ pub fn export(items: &[Item]) -> String {
             (i.auto_check as u8).to_string(),
             i.notes.clone(),
             i.owner_kind.filter(|_| !i.owner.is_empty()).map(|k| k.id().to_string()).unwrap_or_default(),
+            i.business_days.map(|b| b.id()).unwrap_or_default(),
         ];
         out.push_str(&cells.iter().map(|c| quote(c)).collect::<Vec<_>>().join(","));
         out.push('\n');
@@ -155,6 +156,7 @@ pub fn import(s: &str, today: date::Date) -> Imported {
         it.auto_check = matches!(get("auto_check").to_lowercase().as_str(), "1" | "true" | "yes");
         it.notes = get("notes");
         it.owner_kind = crate::entity::EntityKind::from_id(&get("owner_kind")).filter(|_| !it.owner.is_empty());
+        it.business_days = crate::holidays::BusinessDays::parse(&get("business_days"));
         out.items.push(it);
     }
     out
@@ -184,6 +186,7 @@ mod tests {
         b.notice_days = Some(60);
         b.state = State::InProgress;
         b.recurrence = Recurrence::Yearly { month: 1, day: 31 };
+        b.business_days = crate::holidays::BusinessDays::parse("prev:co");
         let csv = export(&[a.clone(), b.clone()]);
         let back = import(&csv, today);
         assert!(back.skipped.is_empty());

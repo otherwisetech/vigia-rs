@@ -19,7 +19,7 @@ struct Args {
 }
 
 /// Options that take a value; everything else starting with `--` is a flag.
-const WITH_VALUE: &[&str] = &["db", "days", "status", "owner", "owner-kind", "ident", "detail", "year", "country", "role", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
+const WITH_VALUE: &[&str] = &["db", "days", "status", "owner", "owner-kind", "business-days", "country", "year", "ident", "detail", "role", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args::default();
@@ -90,6 +90,7 @@ fn item_json(it: &Item, today: Date) -> Value {
         "reference": it.reference,
         "tags": it.tags,
         "renewal_url": it.renewal_url,
+        "business_days": it.business_days.map(|b| b.id()),
         "auto_renews": it.auto_renews,
         "lead_days": it.leads(),
         "snoozed_until": d(it.snoozed_until),
@@ -217,6 +218,12 @@ fn apply_opts(it: &mut Item, a: &Args, today: Date) -> Result<(), String> {
     }
     if let Some(v) = a.opt("recurrence") {
         it.recurrence = vigia_core::model::Recurrence::parse(v).ok_or_else(|| i18n::t!("cli.err.bad_recurrence", value = v))?;
+    }
+    if let Some(v) = a.opt("business-days") {
+        it.business_days = match v.trim() {
+            "" | "none" => None,
+            v => Some(vigia_core::holidays::BusinessDays::parse(v).ok_or_else(|| i18n::t!("cli.err.bad_business_days", value = v))?),
+        };
     }
     if a.flag("auto-renews") {
         it.auto_renews = true;
@@ -440,6 +447,16 @@ fn run(a: &Args) -> Result<(), String> {
                 out(a, json!({"id": id, "from": from.id, "to": to.id, "role": role.id()}), || i18n::t!("cli.relate.done", from = from.name, to = to.name, role = role.label()));
             }
         }
+        "holidays" => {
+            let year: i32 = a.opt("year").map(|y| y.parse().map_err(|_| i18n::t!("cli.err.bad_number", value = y))).transpose()?.unwrap_or_else(|| chrono::Datelike::year(&today));
+            let countries: Vec<vigia_core::holidays::Country> = match a.opt("country") {
+                Some(c) => c.split(',').map(|x| vigia_core::holidays::Country::from_id(x).ok_or_else(|| i18n::t!("cli.err.bad_country", value = x))).collect::<Result<_, _>>()?,
+                None => vigia_core::holidays::Country::ALL.to_vec(),
+            };
+            let (from, to) = (date::ymd(year, 1, 1).unwrap_or(today), date::ymd(year, 12, 31).unwrap_or(today));
+            let v = vigia_core::holidays::between(&countries, from, to);
+            out(a, Value::Array(v.iter().map(|h| json!({"date": date::iso(h.date), "name": h.name, "country": h.country.id()})).collect()), || v.iter().map(|h| format!("{}  {:<6} {}", date::iso(h.date), h.country.id(), h.name)).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
+        }
         "kinds" => {
             out(a, Value::Array(Kind::ALL.iter().map(|k| json!({"id": k.id(), "label": k.label(), "category": k.category().id(), "lead_days": k.lead_days(), "recurrence": k.recurrence().id()})).collect()), || Kind::ALL.iter().map(|k| format!("{:<22} {}", k.id(), k.label())).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
         }
@@ -533,7 +550,8 @@ mod tests {
         let db = dir.path().join("e.db");
         let d = db.to_str().unwrap();
         run(&args(&["--db", d, "add", "Tecno", "#ABC123", "2099-01-01"])).unwrap();
-        run(&args(&["--db", d, "add", "RUT", "@Otherwise_SAS"])).unwrap();
+        run(&args(&["--db", d, "add", "RUT", "@Otherwise_SAS", "2029-03-31", "--business-days", "prev:co"])).unwrap();
+        assert!(run(&args(&["--db", d, "add", "x", "--business-days", "sideways"])).is_err());
         run(&args(&["--db", d, "add", "Pasaporte", "@Juan"])).unwrap();
         run(&args(&["--db", d, "entity", "ABC123", "--name", "Mazda ABC123", "--detail", "Mazda 3", "--year", "2019"])).unwrap();
         run(&args(&["--db", d, "add", "SOAT", "@Mazda", "2099-02-01"])).unwrap();
@@ -552,6 +570,10 @@ mod tests {
         let items = s.items().unwrap();
         assert_eq!(items.iter().filter(|i| i.entity == Some(car.id)).count(), 2);
         assert_eq!(s.relations().unwrap().len(), 2);
+        let rut = items.iter().find(|i| i.kind == Kind::Rut).unwrap();
+        assert_eq!(item_json(rut, date::today())["due"], json!("2029-03-28"));
+        assert!(run(&args(&["--db", d, "holidays", "--country", "co", "--year", "2026"])).is_ok());
+        assert!(run(&args(&["--db", d, "holidays", "--country", "atlantis"])).is_err());
         let j = entity_json(car, &items);
         assert_eq!((j["kind"].clone(), j["items"].clone()), (json!("vehicle"), json!(2)));
         drop(s);

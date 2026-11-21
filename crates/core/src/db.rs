@@ -53,6 +53,11 @@ pub const MIGRATIONS: &[&str] = &[
        UNIQUE (from_id, to_id));
      ALTER TABLE items ADD COLUMN entity_id INTEGER REFERENCES entities(id) ON DELETE SET NULL;
      CREATE INDEX items_entity ON items(entity_id);",
+    // 3: business-day rule per item; calendars (.ics files or URLs) shown read-only
+    "ALTER TABLE items ADD COLUMN business_days TEXT NOT NULL DEFAULT '';
+     CREATE TABLE calendars (
+       id INTEGER PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
+       fetched INTEGER, enabled INTEGER NOT NULL DEFAULT 1);",
 ];
 
 /// Version 2: each distinct owner (case-insensitively) becomes an entity, its kind inferred
@@ -154,7 +159,7 @@ pub fn files_dir(db: &Path) -> PathBuf {
     db.parent().unwrap_or(Path::new(".")).join(FILES_DIR)
 }
 
-const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind";
+const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind, i.business_days";
 const ITEM_FROM: &str = "items i LEFT JOIN entities e ON e.id = i.entity_id";
 const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated";
 
@@ -205,6 +210,7 @@ fn item_from_row(r: &Row) -> rusqlite::Result<Item> {
         updated: r.get(26)?,
         entity: r.get(27)?,
         owner_kind: r.get::<_, Option<String>>(28)?.and_then(|k| EntityKind::from_id(&k)),
+        business_days: crate::holidays::BusinessDays::parse(&r.get::<_, String>(29)?),
     })
 }
 
@@ -311,8 +317,8 @@ impl Store {
         let now = now_secs();
         let (entity, owner) = self.resolve_owner(item)?;
         self.conn.execute(
-            "INSERT INTO items (kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated, entity_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?25, ?26)",
+            "INSERT INTO items (kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated, entity_id, business_days)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?25, ?26, ?27)",
             params![
                 item.kind.id(),
                 item.name,
@@ -340,6 +346,7 @@ impl Store {
                 item.check_note,
                 if item.created > 0 { item.created } else { now },
                 entity,
+                item.business_days.map(|b| b.id()).unwrap_or_default(),
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
@@ -348,7 +355,7 @@ impl Store {
     pub fn update(&self, item: &Item) -> Result<()> {
         let (entity, owner) = self.resolve_owner(item)?;
         let n = self.conn.execute(
-            "UPDATE items SET kind = ?2, name = ?3, owner = ?4, category = ?5, issued = ?6, expires = ?7, recurrence = ?8, term_months = ?9, notice_days = ?10, cost = ?11, currency = ?12, provider = ?13, reference = ?14, notes = ?15, tags = ?16, renewal_url = ?17, auto_renews = ?18, lead_days = ?19, state = ?20, snoozed_until = ?21, host = ?22, auto_check = ?23, last_checked = ?24, check_note = ?25, updated = ?26, entity_id = ?27 WHERE id = ?1",
+            "UPDATE items SET kind = ?2, name = ?3, owner = ?4, category = ?5, issued = ?6, expires = ?7, recurrence = ?8, term_months = ?9, notice_days = ?10, cost = ?11, currency = ?12, provider = ?13, reference = ?14, notes = ?15, tags = ?16, renewal_url = ?17, auto_renews = ?18, lead_days = ?19, state = ?20, snoozed_until = ?21, host = ?22, auto_check = ?23, last_checked = ?24, check_note = ?25, updated = ?26, entity_id = ?27, business_days = ?28 WHERE id = ?1",
             params![
                 item.id,
                 item.kind.id(),
@@ -377,6 +384,7 @@ impl Store {
                 item.check_note,
                 now_secs(),
                 entity,
+                item.business_days.map(|b| b.id()).unwrap_or_default(),
             ],
         )?;
         if n == 0 {
@@ -510,6 +518,43 @@ impl Store {
 
     pub fn unrelate(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM relations WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    // ── calendars ────────────────────────────────────────────────────────────────────────────
+
+    pub fn calendars(&self) -> Result<Vec<crate::calendars::Calendar>> {
+        let mut st = self.conn.prepare("SELECT id, name, source, body, fetched, enabled FROM calendars ORDER BY id")?;
+        let v = st
+            .query_map([], |r| Ok(crate::calendars::Calendar { id: r.get(0)?, name: r.get(1)?, source: r.get(2)?, body: r.get(3)?, fetched: r.get(4)?, enabled: r.get::<_, i64>(5)? != 0 }))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    /// Inserts (id 0) or updates a calendar.
+    pub fn save_calendar(&self, c: &crate::calendars::Calendar) -> Result<i64> {
+        if c.id == 0 {
+            self.conn.execute("INSERT INTO calendars (name, source, body, fetched, enabled) VALUES (?1, ?2, ?3, ?4, ?5)", params![c.name, c.source, c.body, c.fetched, c.enabled as i64])?;
+            return Ok(self.conn.last_insert_rowid());
+        }
+        self.conn.execute("UPDATE calendars SET name = ?2, source = ?3, body = ?4, fetched = ?5, enabled = ?6 WHERE id = ?1", params![c.id, c.name, c.source, c.body, c.fetched, c.enabled as i64])?;
+        Ok(c.id)
+    }
+
+    pub fn delete_calendar(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM calendars WHERE id = ?1", [id])?;
+        Ok(())
+    }
+
+    /// Meta entries whose key starts with `prefix` (key, value).
+    pub fn metas(&self, prefix: &str) -> Result<Vec<(String, String)>> {
+        let mut st = self.conn.prepare("SELECT key, value FROM meta WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key")?;
+        let v = st.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    pub fn delete_meta(&self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM meta WHERE key = ?1", [key])?;
         Ok(())
     }
 
@@ -691,11 +736,24 @@ mod tests {
         let mut changed = back.clone();
         changed.name = "Pasaporte CO".into();
         changed.recurrence = Recurrence::Wyoming { month: 4 };
+        changed.business_days = crate::holidays::BusinessDays::parse("next:co");
         s.update(&changed).unwrap();
         drop(s);
         let s = Store::open(&path).unwrap();
         assert_eq!(s.items().unwrap().len(), 1);
         assert_eq!(s.item(it.id).unwrap().recurrence, Recurrence::Wyoming { month: 4 });
+        assert_eq!(s.item(it.id).unwrap().business_days.map(|b| b.id()), Some("next:co".into()));
+        let cal = crate::calendars::Calendar { name: "Festivos".into(), source: "/x/festivos.ics".into(), body: "BEGIN:VCALENDAR".into(), ..Default::default() };
+        let cid = s.save_calendar(&cal).unwrap();
+        s.save_calendar(&crate::calendars::Calendar { id: cid, enabled: false, ..cal.clone() }).unwrap();
+        assert_eq!(s.calendars().unwrap()[0], crate::calendars::Calendar { id: cid, enabled: false, ..cal });
+        s.delete_calendar(cid).unwrap();
+        assert!(s.calendars().unwrap().is_empty());
+        s.set_meta("live_ics:3", "/x/a.ics").unwrap();
+        s.set_meta("live_icsX", "no").unwrap();
+        assert_eq!(s.metas("live_ics:").unwrap(), vec![("live_ics:3".to_string(), "/x/a.ics".to_string())]);
+        s.delete_meta("live_ics:3").unwrap();
+        assert!(s.metas("live_ics:").unwrap().is_empty());
         let mode: String = s.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "delete");
         assert!(matches!(s.item(999), Err(StoreError::NotFound(999))));
@@ -731,7 +789,7 @@ mod tests {
         let s = Store::open(&path).unwrap();
         assert_eq!(s.version().unwrap(), latest_version());
         // every table the code uses exists
-        for t in ["meta", "items", "attachments", "renewals", "reminders_sent", "entities", "relations"] {
+        for t in ["meta", "items", "attachments", "renewals", "reminders_sent", "entities", "relations", "calendars"] {
             let n: i64 = s.conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "{t}");
         }

@@ -146,6 +146,8 @@ pub struct VigiaApp {
     pub edit: Option<crate::panel::EditForm>,
     pub entity_edit: Option<crate::entities::EntityForm>,
     pub graph: crate::graph::GraphState,
+    /// Countries whose public holidays show in the calendar and timeline.
+    pub holidays: Vec<vigia_core::holidays::Country>,
     pub dialog: Option<Dialog>,
     pub about: bool,
     toast: Option<(String, Instant)>,
@@ -208,6 +210,7 @@ impl VigiaApp {
             edit: None,
             entity_edit: None,
             graph: crate::graph::GraphState::default(),
+            holidays: Settings::load().holiday_countries(),
             dialog: None,
             about: false,
             toast: None,

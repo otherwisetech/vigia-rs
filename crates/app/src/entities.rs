@@ -125,8 +125,9 @@ impl VigiaApp {
         cx.notify();
     }
 
-    /// Writes the calendar of this entity's items (`Otherwise SAS.ics`).
-    fn export_entity_ics(&mut self, id: EntityId, window: &mut Window, cx: &mut Context<Self>) {
+    /// Writes the calendar of this entity's items (`Otherwise SAS.ics`) once, or (`live`) keeps
+    /// that file up to date from now on.
+    fn pick_entity_ics(&mut self, id: EntityId, live: bool, window: &mut Window, cx: &mut Context<Self>) {
         let Some(e) = self.data.read(cx).entity(id).cloned() else { return };
         let name = format!("{}.ics", vigia_core::db::sanitize(&e.name)); // i18n-ok: file name
         let dir = crate::app::documents_dir();
@@ -134,6 +135,10 @@ impl VigiaApp {
         cx.spawn_in(window, async move |this, cx| {
             if let Ok(Ok(Some(p))) = rx.await {
                 this.update(cx, |this, cx| {
+                    if live {
+                        this.data.update(cx, |d, cx| d.set_live_ics(id, Some(p.clone()), cx));
+                        return this.toast(i18n::t!("app.entity.live_ics_on", file = p.display()), cx);
+                    }
                     let items: Vec<Item> = this.data.read(cx).items.iter().filter(|i| i.entity == Some(id)).cloned().collect();
                     let text = vigia_core::ics::export(&items, Data::today(), vigia_core::db::now_secs());
                     match std::fs::write(&p, text) {
@@ -161,11 +166,21 @@ impl VigiaApp {
         let name_of = |x: EntityId| all.iter().find(|o| o.id == x).cloned();
 
         let weak = cx.entity().downgrade();
+        let live = d.live_ics.iter().find(|(e, _)| *e == id).map(|(_, p)| p.display().to_string());
         let more = Button::new("ent-more").ghost().small().icon(IconName::Ellipsis).dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-            let (w1, w2) = (weak.clone(), weak.clone());
+            let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+            let live_item = match &live {
+                Some(p) => PopupMenuItem::new(i18n::t!("app.entity.live_ics_stop", file = p.clone())).on_click(move |_, _, cx| {
+                    w3.update(cx, |this, cx| this.data.update(cx, |d, cx| d.set_live_ics(id, None, cx))).ok();
+                }),
+                None => PopupMenuItem::new(i18n::t!("app.entity.live_ics")).on_click(move |_, window, cx| {
+                    w3.update(cx, |this, cx| this.pick_entity_ics(id, true, window, cx)).ok();
+                }),
+            };
             menu.item(PopupMenuItem::new(i18n::t!("app.entity.export_ics")).on_click(move |_, window, cx| {
-                w1.update(cx, |this, cx| this.export_entity_ics(id, window, cx)).ok();
+                w1.update(cx, |this, cx| this.pick_entity_ics(id, false, window, cx)).ok();
             }))
+            .item(live_item)
             .separator()
             .item(PopupMenuItem::new(i18n::t!("app.entity.delete")).on_click(move |_, _, cx| {
                 w2.update(cx, |this, cx| this.ask_delete_entity(id, cx)).ok();
