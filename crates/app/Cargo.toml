@@ -17,6 +17,8 @@ vigia-core = { workspace = true, features = ["ocr"] }
 anyhow.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+otherwise-link.workspace = true
+uuid.workspace = true
 # GitHub star count (one GET a day)
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 gpui.workspace = true

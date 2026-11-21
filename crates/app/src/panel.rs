@@ -139,6 +139,15 @@ impl VigiaApp {
         cx.notify();
     }
 
+    /// The new-item form, filled from `it` (a deep link's prefill); nothing is saved yet.
+    pub fn start_new_with(&mut self, it: Item, window: &mut Window, cx: &mut Context<Self>) {
+        self.selected = None;
+        self.entity_edit = None;
+        let f = self.form_from(Item { id: 0, ..it }, window, cx);
+        self.edit = Some(f);
+        cx.notify();
+    }
+
     pub fn start_edit(&mut self, id: ItemId, window: &mut Window, cx: &mut Context<Self>) {
         let Some(it) = self.data.read(cx).item(id).cloned() else { return };
         self.selected = Some(id);

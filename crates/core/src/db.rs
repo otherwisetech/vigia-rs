@@ -15,6 +15,8 @@ use std::path::{Path, PathBuf};
 pub const APPLICATION_ID: i32 = 0x5647_4941;
 pub const EXTENSION: &str = "db";
 pub const FILES_DIR: &str = "vigia-files";
+/// `meta` keys of shared cards whose Vigía entity was deleted, to unlink on the next sync.
+pub const UNLINK_PREFIX: &str = "shared_unlink:";
 
 /// Schema steps; `MIGRATIONS[i]` takes the file from version `i` to `i + 1`. Never edit a
 /// shipped step: add a new one.
@@ -58,6 +60,11 @@ pub const MIGRATIONS: &[&str] = &[
      CREATE TABLE calendars (
        id INTEGER PRIMARY KEY, name TEXT NOT NULL, source TEXT NOT NULL, body TEXT NOT NULL DEFAULT '',
        fetched INTEGER, enabled INTEGER NOT NULL DEFAULT 1);",
+    // 4: link to the shared entity registry of the Otherwise apps (opt-in): the card's id and
+    // which revision of the entity was last pushed or pulled
+    "ALTER TABLE entities ADD COLUMN shared_id TEXT;
+     ALTER TABLE entities ADD COLUMN rev INTEGER NOT NULL DEFAULT 1;
+     ALTER TABLE entities ADD COLUMN shared_rev INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Version 2: each distinct owner (case-insensitively) becomes an entity, its kind inferred
@@ -161,7 +168,7 @@ pub fn files_dir(db: &Path) -> PathBuf {
 
 const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind, i.business_days";
 const ITEM_FROM: &str = "items i LEFT JOIN entities e ON e.id = i.entity_id";
-const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated";
+const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated, shared_id";
 
 fn entity_from_row(r: &Row) -> rusqlite::Result<Entity> {
     Ok(Entity {
@@ -175,6 +182,7 @@ fn entity_from_row(r: &Row) -> rusqlite::Result<Entity> {
         notes: r.get(7)?,
         created: r.get(8)?,
         updated: r.get(9)?,
+        shared: r.get(10)?,
     })
 }
 
@@ -479,7 +487,7 @@ impl Store {
     pub fn update_entity(&self, e: &Entity) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let n = tx.execute(
-            "UPDATE entities SET kind = ?2, name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9 WHERE id = ?1",
+            "UPDATE entities SET kind = ?2, name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9, rev = rev + 1 WHERE id = ?1",
             params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs()],
         )?;
         if n == 0 {
@@ -490,13 +498,44 @@ impl Store {
         Ok(())
     }
 
-    /// Deletes the entity and its relations; its items stay, with no owner.
+    /// Deletes the entity and its relations; its items stay, with no owner. A shared one is
+    /// queued for unlinking from the registry (its card stays for the other apps).
     pub fn delete_entity(&self, id: EntityId) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
+        let shared: Option<String> = tx.query_row("SELECT shared_id FROM entities WHERE id = ?1", [id], |r| r.get(0)).optional()?.flatten();
+        if let Some(sid) = shared.filter(|s| uuid::Uuid::parse_str(s).is_ok()) {
+            tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![format!("{UNLINK_PREFIX}{sid}"), id.to_string()])?;
+        }
         tx.execute("UPDATE items SET owner = '', entity_id = NULL WHERE entity_id = ?1", [id])?;
         tx.execute("DELETE FROM entities WHERE id = ?1", [id])?;
         tx.commit()?;
         Ok(())
+    }
+
+    // ── shared registry link ─────────────────────────────────────────────────────────────────
+
+    /// `(id, rev, shared_rev)` of every entity: `rev` grows on each edit, `shared_rev` is the
+    /// revision last pushed to / pulled from the registry.
+    pub fn entity_revs(&self) -> Result<Vec<(EntityId, i64, i64)>> {
+        let mut st = self.conn.prepare("SELECT id, rev, shared_rev FROM entities ORDER BY id")?;
+        let v = st.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    /// Links the entity to shared card `shared` (or unlinks it) and marks its current revision
+    /// as in sync.
+    pub fn set_shared(&self, id: EntityId, shared: Option<&str>) -> Result<()> {
+        self.conn.execute("UPDATE entities SET shared_id = ?2, shared_rev = rev WHERE id = ?1", params![id, shared])?;
+        Ok(())
+    }
+
+    /// Repoints every entity linked to `from` (a card merged into `to`).
+    pub fn repoint_shared(&self, from: &str, to: &str) -> Result<usize> {
+        Ok(self.conn.execute("UPDATE entities SET shared_id = ?2 WHERE shared_id = ?1", params![from, to])?)
+    }
+
+    pub fn entity_by_shared(&self, shared: &str) -> Result<Option<Entity>> {
+        Ok(self.conn.query_row(&format!("SELECT {ENTITY_COLS} FROM entities WHERE shared_id = ?1 ORDER BY id LIMIT 1"), [shared], entity_from_row).optional()?)
     }
 
     // ── relations ────────────────────────────────────────────────────────────────────────────
@@ -793,6 +832,8 @@ mod tests {
             let n: i64 = s.conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "{t}");
         }
+        // 4: the registry link columns
+        let _: Option<(Option<String>, i64, i64)> = s.conn.query_row("SELECT shared_id, rev, shared_rev FROM entities", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).optional().unwrap();
     }
 
     /// A version-1 file with free-text owners: each becomes one entity of a guessed kind.

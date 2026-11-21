@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Wraps the `vigia-app` binary (and the `vigia` CLI) in a macOS .app so Finder, the Dock and
-# Notification Center show the app icon.
+# Notification Center show the app icon. CFBundleURLTypes registers `otherwise-vigia://` (the
+# block is otherwise_link::register::macos_url_types; a core test keeps them equal).
 # Usage: script/bundle-macos.sh [debug|release]   (default: release; builds first)
 #        UNIVERSAL=1 script/bundle-macos.sh       (release for Apple silicon + Intel, joined with lipo)
 set -euo pipefail
@@ -42,6 +43,14 @@ cat > "$app/Contents/Info.plist" <<PLIST
   <key>LSMinimumSystemVersion</key><string>11.0</string>
   <key>LSApplicationCategoryType</key><string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key><string>io.github.otherwisetech.vigia-app</string>
+      <key>CFBundleTypeRole</key><string>Viewer</string>
+      <key>CFBundleURLSchemes</key><array><string>otherwise-vigia</string></array>
+    </dict>
+  </array>
 </dict>
 </plist>
 PLIST

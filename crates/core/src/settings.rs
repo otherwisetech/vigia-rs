@@ -26,6 +26,10 @@ pub struct Settings {
     pub remind_hour: Option<u32>,
     /// Public holidays shown in the calendar and timeline (`co`, `us`, `us-wy`, …).
     pub holidays: Option<Vec<String>>,
+    /// `false`: don't publish deadlines to Otherwise Apps' Today view.
+    pub today_feed: Option<bool>,
+    /// The executable `otherwise-vigia://` was last registered for (Windows / Linux).
+    pub link_registered: Option<String>,
 }
 
 impl Settings {
@@ -73,6 +77,9 @@ impl Settings {
     pub fn auto_checks(&self) -> bool {
         self.auto_checks != Some(false)
     }
+    pub fn today_feed(&self) -> bool {
+        self.today_feed != Some(false)
+    }
     pub fn ics_sync(&self) -> bool {
         self.ics_sync == Some(true)
     }
@@ -91,14 +98,14 @@ mod tests {
 
     #[test]
     fn roundtrip_and_defaults() {
-        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30), holidays: Some(vec!["co".into(), "mars".into(), "us-wy".into()]) };
+        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30), holidays: Some(vec!["co".into(), "mars".into(), "us-wy".into()]), today_feed: Some(false), link_registered: Some("/x/vigia-app".into()) };
         assert_eq!(Settings::parse(&s.to_json()), s);
-        assert!(!s.github_stars() && !s.notify() && !s.tray() && !s.auto_checks() && s.ics_sync());
+        assert!(!s.github_stars() && !s.notify() && !s.tray() && !s.auto_checks() && s.ics_sync() && !s.today_feed());
         assert_eq!(s.remind_hour(), 23);
         assert_eq!(s.holiday_countries(), vec![crate::holidays::Country::Co, crate::holidays::Country::UsWy]);
         assert!(Settings::default().holiday_countries().is_empty());
         let d = Settings::default();
-        assert!(d.github_stars() && d.notify() && d.tray() && d.auto_checks() && !d.ics_sync());
+        assert!(d.github_stars() && d.notify() && d.tray() && d.auto_checks() && !d.ics_sync() && d.today_feed());
         assert_eq!(d.remind_hour(), 9);
         assert_eq!(Settings::parse("garbage"), d);
         assert_eq!(Settings::parse(r#"{"language":"fr","unknown":1}"#).language.as_deref(), Some("fr"));

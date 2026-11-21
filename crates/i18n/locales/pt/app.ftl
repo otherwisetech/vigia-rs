@@ -356,3 +356,11 @@ app.edit.biz_none = Manter a data
 app.edit.biz_prev = Dia útil anterior
 app.edit.biz_next = Próximo dia útil
 app.edit.biz_weekends = Só fins de semana
+
+# Otherwise Apps: Today view, shared registry, deep links
+app.settings.otherwise = Otherwise Apps
+app.settings.today = Mostrar o que vence na visão Hoje do Otherwise Apps
+app.settings.registry_on = Pessoas, veículos, empresas, imóveis e ativos digitais são compartilhados com os outros apps da Otherwise (ativado no Otherwise Apps).
+app.settings.registry_off = O compartilhamento de pessoas, veículos e empresas com os outros apps da Otherwise está desativado; ative-o no Otherwise Apps.
+app.link.not_found = Isso não está neste banco de dados do Vigía.
+app.link.unknown = O Vigía não consegue abrir este link: {url}

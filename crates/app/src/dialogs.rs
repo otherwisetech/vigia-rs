@@ -22,6 +22,7 @@ pub struct SettingsForm {
     pub login: bool,
     pub auto_checks: bool,
     pub ics_sync: bool,
+    pub today: bool,
     pub stars: bool,
     pub hour: Entity<InputState>,
 }
@@ -87,7 +88,7 @@ impl VigiaApp {
     pub fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let s = Settings::load();
         let hour = cx.new(|cx| InputState::new(window, cx).default_value(s.remind_hour().to_string()));
-        self.dialog = Some(Dialog::Settings(SettingsForm { notify: s.notify(), tray: s.tray(), login: crate::system::launch_at_login(), auto_checks: s.auto_checks(), ics_sync: s.ics_sync(), stars: s.github_stars(), hour }));
+        self.dialog = Some(Dialog::Settings(SettingsForm { notify: s.notify(), tray: s.tray(), login: crate::system::launch_at_login(), auto_checks: s.auto_checks(), ics_sync: s.ics_sync(), today: s.today_feed(), stars: s.github_stars(), hour }));
         cx.notify();
     }
 
@@ -100,6 +101,7 @@ impl VigiaApp {
             s.tray = (!f.tray).then_some(false);
             s.auto_checks = (!f.auto_checks).then_some(false);
             s.ics_sync = f.ics_sync.then_some(true);
+            s.today_feed = (!f.today).then_some(false);
             s.remind_hour = hour.filter(|h| *h != 9);
         });
         if f.login != crate::system::launch_at_login()
@@ -112,6 +114,9 @@ impl VigiaApp {
         }
         if f.ics_sync && !before.ics_sync() {
             self.data.read(cx).sync_ics();
+        }
+        if f.today != before.today_feed() {
+            self.data.update(cx, |d, _| d.publish_today());
         }
         crate::sync_tray(cx);
         if f.auto_checks && !before.auto_checks() {
@@ -305,6 +310,9 @@ impl VigiaApp {
                     .child(ui::section_title(t, i18n::t!("app.settings.calendar")))
                     .child(check("set-ics", i18n::t!("app.settings.ics"), f.ics_sync, |f, v| f.ics_sync = v))
                     .child(hint(i18n::t!("app.settings.ics_hint", path = ics)))
+                    .child(ui::section_title(t, i18n::t!("app.settings.otherwise")))
+                    .child(check("set-today", i18n::t!("app.settings.today"), f.today, |f, v| f.today = v))
+                    .child(hint(if otherwise_link::settings::HubSettings::load(&otherwise_link::Root::system()).entities { i18n::t!("app.settings.registry_on") } else { i18n::t!("app.settings.registry_off") }))
                     .child(ui::section_title(t, i18n::t!("app.settings.ocr")))
                     .child(div().flex().items_center().gap(px(8.)).child(icon(if models { IconName::CircleCheck } else { IconName::Info }, 14., if models { t.ok } else { t.ink_muted })).child(div().text_size(px(12.5)).child(if models { i18n::t!("app.settings.ocr_ready") } else { i18n::t!("app.settings.ocr_missing") })))
                     .child(hint(i18n::t!("app.ocr.models_privacy")))

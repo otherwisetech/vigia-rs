@@ -159,11 +159,38 @@ struct Handles {
     pending: Vec<Pending>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 enum Pending {
     Select(i64),
     About,
     QuickAdd,
+    Link(otherwise_link::Link),
+}
+
+/// Links from the OS (macOS Apple events arrive without an `App` and maybe before the window).
+static INBOUND_LINKS: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Makes the OS send `otherwise-vigia://` links here. macOS: the bundle's Info.plist does it.
+/// Windows: the per-user registry, written once per executable path (`reg` would flash a
+/// console on every start). Linux: only once the menu entry is installed.
+fn register_scheme() {
+    use vigia_core::links::SCHEME;
+    let Ok(exe) = std::env::current_exe() else { return };
+    let exe_s = exe.display().to_string();
+    if Settings::load().link_registered.as_deref() == Some(exe_s.as_str()) {
+        return;
+    }
+    let done = if cfg!(windows) {
+        otherwise_link::register::register_windows(SCHEME, &exe, APP_NAME).is_ok()
+    } else if cfg!(target_os = "linux") {
+        let installed = otherwise_link::paths::home().join(".local/share/applications").join(vigia_core::links::DESKTOP_FILE);
+        installed.exists() && otherwise_link::register::register_linux(vigia_core::links::DESKTOP_FILE, &[SCHEME]).is_ok()
+    } else {
+        false
+    };
+    if done {
+        Settings::update(|s| s.link_registered = Some(exe_s));
+    }
 }
 
 impl Global for Handles {}
@@ -209,6 +236,10 @@ fn pump(cx: &mut App) {
             macos::Event::Quit => cx.quit(),
         }
     }
+    let links = std::mem::take(&mut *INBOUND_LINKS.lock().unwrap_or_else(|e| e.into_inner()));
+    for l in links.iter().filter_map(|u| otherwise_link::Link::parse(u).ok()) {
+        cx.global_mut::<Handles>().pending.push(Pending::Link(l));
+    }
     if cx.global::<Handles>().pending.is_empty() {
         return;
     }
@@ -227,6 +258,7 @@ fn pump(cx: &mut App) {
                         Pending::Select(id) => this.select_and_show(id, cx),
                         Pending::About => this.show_about(cx),
                         Pending::QuickAdd => this.focus_quick(window, cx),
+                        Pending::Link(l) => this.open_link(&l, window, cx),
                     }
                 }
             });
@@ -288,6 +320,13 @@ fn tick(cx: &mut App, n: u64) {
     if n.is_multiple_of(120) {
         d.update(cx, |d, cx| d.run_due_checks(cx));
     }
+    // the Today feed follows the date; the shared registry after edits and every 5 minutes
+    d.update(cx, |d, cx| {
+        d.publish_today();
+        if d.sync_dirty || n.is_multiple_of(10) {
+            d.sync_shared(cx);
+        }
+    });
     sync_tray(cx);
 }
 
@@ -295,10 +334,12 @@ struct Opts {
     db: Option<PathBuf>,
     demo: bool,
     background: bool,
+    /// Linux / Windows hand a deep link over as an argument.
+    link: Option<otherwise_link::Link>,
 }
 
 fn parse_opts(args: &[String]) -> Result<Opts, String> {
-    let mut o = Opts { db: None, demo: false, background: false };
+    let mut o = Opts { db: None, demo: false, background: false, link: None };
     let mut it = args.iter();
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -306,6 +347,7 @@ fn parse_opts(args: &[String]) -> Result<Opts, String> {
             "--demo" => o.demo = true,
             "--background" => o.background = true,
             s if s.starts_with("-psn_") => {} // old macOS Finder launch argument
+            s if s.contains("://") => o.link = Some(otherwise_link::Link::parse(s).map_err(|_| i18n::t!("app.cli.usage"))?),
             _ => return Err(i18n::t!("app.cli.usage")),
         }
     }
@@ -342,8 +384,11 @@ fn main() {
         }
         data.reload();
     }
-    let background = opts.background && tray_enabled();
+    let background = opts.background && tray_enabled() && opts.link.is_none();
+    let first_link = opts.link.clone();
+    std::thread::spawn(register_scheme);
     let application = gpui_platform::application().with_assets(AppAssets);
+    application.on_open_urls(|urls| INBOUND_LINKS.lock().unwrap_or_else(|e| e.into_inner()).extend(urls));
     application.on_reopen(open_main_window);
     application.run(move |cx| {
         if let Err(e) = cx.text_system().add_fonts(FONTS.iter().map(|f| Cow::Borrowed(*f)).collect()) {
@@ -357,7 +402,7 @@ fn main() {
         let data = cx.new(|_| data);
         cx.observe(&data, |_, cx| sync_tray(cx)).detach();
         cx.set_global(state::Shared(data));
-        cx.set_global(Handles::default());
+        cx.set_global(Handles { pending: first_link.into_iter().map(Pending::Link).collect(), ..Default::default() });
         cx.bind_keys([KeyBinding::new("secondary-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &OpenWebsite, cx| cx.open_url(COMPANY_URL));
@@ -402,5 +447,8 @@ mod tests {
         assert!(p(&["--background"]).unwrap().background);
         assert!(p(&["--db"]).is_err());
         assert!(p(&["--nope"]).is_err());
+        let o = p(&["otherwise-vigia://item/42"]).unwrap();
+        assert_eq!(o.link.map(|l| l.to_url()), Some("otherwise://vigia/item/42".to_string()));
+        assert!(p(&["otherwise://"]).is_err());
     }
 }

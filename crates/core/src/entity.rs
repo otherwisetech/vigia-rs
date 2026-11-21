@@ -96,6 +96,9 @@ pub struct Entity {
     pub notes: String,
     pub created: i64,
     pub updated: i64,
+    /// Id of its card in the shared registry of the Otherwise apps, once synced
+    /// ([`crate::sync::DETACHED`] after the card was deleted there).
+    pub shared: Option<String>,
 }
 
 impl Entity {

@@ -273,6 +273,40 @@ impl VigiaApp {
         }
     }
 
+    /// A deep link (`otherwise://vigia/…`, from another app or the Today view).
+    pub fn open_link(&mut self, link: &otherwise_link::Link, window: &mut Window, cx: &mut Context<Self>) {
+        use vigia_core::links::Route;
+        match vigia_core::links::route(link) {
+            Route::Focus => {}
+            Route::Item(id) => {
+                if self.data.read(cx).item(id).is_some() {
+                    self.select(id, cx);
+                } else {
+                    self.toast(i18n::t!("app.link.not_found"), cx);
+                }
+            }
+            Route::Owner(id) => {
+                if self.data.read(cx).entity(id).is_some() {
+                    self.open_entity(id, cx);
+                } else {
+                    self.toast(i18n::t!("app.link.not_found"), cx);
+                }
+            }
+            Route::Shared(uuid) => match self.data.read(cx).entity_for_shared(uuid) {
+                Some(id) => self.open_entity(id, cx),
+                None => self.toast(i18n::t!("app.link.not_found"), cx),
+            },
+            Route::New(p) => {
+                let it = {
+                    let d = self.data.read(cx);
+                    p.to_item(Data::today(), Self::order(), |u| d.entity_for_shared(u).and_then(|id| d.entity(id)).map(|e| (e.id, e.name.clone(), e.kind)))
+                };
+                self.start_new_with(it, window, cx);
+            }
+            Route::Unknown => self.toast(i18n::t!("app.link.unknown", url = link.to_url()), cx),
+        }
+    }
+
     pub fn show_about(&mut self, cx: &mut Context<Self>) {
         self.about = true;
         cx.notify();

@@ -1,5 +1,7 @@
 //! `vigia`: the headless command line on Vigía's engine, for scripts and AI agents. Every
 //! command takes `--json` for machine-readable output and `--db PATH` to use another database.
+mod mcp;
+
 use serde_json::{Value, json};
 use std::path::PathBuf;
 use vigia_core::date::{self, Date};
@@ -65,7 +67,7 @@ impl Args {
     }
 }
 
-fn item_json(it: &Item, today: Date) -> Value {
+pub(crate) fn item_json(it: &Item, today: Date) -> Value {
     let d = |x: Option<Date>| x.map(date::iso);
     json!({
         "id": it.id,
@@ -102,7 +104,7 @@ fn item_json(it: &Item, today: Date) -> Value {
     })
 }
 
-fn entity_json(e: &Entity, items: &[Item]) -> Value {
+pub(crate) fn entity_json(e: &Entity, items: &[Item]) -> Value {
     json!({
         "id": e.id,
         "kind": e.kind.id(),
@@ -112,6 +114,7 @@ fn entity_json(e: &Entity, items: &[Item]) -> Value {
         "year": e.year,
         "country": e.country,
         "notes": e.notes,
+        "shared_id": e.shared.as_deref().filter(|s| *s != vigia_core::sync::DETACHED),
         "items": items.iter().filter(|i| i.entity == Some(e.id)).count(),
     })
 }
@@ -238,12 +241,41 @@ fn id_arg(a: &Args) -> Result<i64, String> {
     a.pos.first().and_then(|s| s.parse().ok()).ok_or_else(|| i18n::t!("cli.err.needs_id"))
 }
 
+/// The user's own database (no `--db`, no `VIGIA_DB`): the one the Today feed and the shared
+/// registry follow.
+fn is_users_db(a: &Args) -> bool {
+    a.db.is_none() && std::env::var_os("VIGIA_DB").is_none_or(|v| v.is_empty())
+}
+
+/// Rewrites Vigía's Today feed from `s` (or removes it when the user turned it off).
+pub(crate) fn publish_today(s: &Store) -> Option<usize> {
+    let root = otherwise_link::Root::system();
+    if !vigia_core::settings::Settings::load().today_feed() {
+        let _ = vigia_core::feed::clear(&root);
+        return None;
+    }
+    let items = s.items().ok()?;
+    let entities = s.entities().ok()?;
+    vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
+}
+
 fn open(a: &Args) -> Result<Store, String> {
     let path = vigia_core::paths::resolve_db(a.db.as_deref()).ok_or_else(|| i18n::t!("cli.err.no_data_dir"))?;
     Store::open_or_create(&path).map_err(|e| format!("{}: {e}", path.display())) // i18n-ok: path: error
 }
 
 fn run(a: &Args) -> Result<(), String> {
+    run_command(a)?;
+    if is_users_db(a)
+        && matches!(a.cmd.as_str(), "add" | "edit" | "renew" | "delete" | "rm" | "check" | "import" | "entity")
+        && let Ok(s) = open(a)
+    {
+        publish_today(&s);
+    }
+    Ok(())
+}
+
+fn run_command(a: &Args) -> Result<(), String> {
     let today = date::today();
     match a.cmd.as_str() {
         "list" | "ls" => {
@@ -463,6 +495,25 @@ fn run(a: &Args) -> Result<(), String> {
         "path" => {
             let p = vigia_core::paths::resolve_db(a.db.as_deref()).ok_or_else(|| i18n::t!("cli.err.no_data_dir"))?;
             out(a, json!({"db": p.display().to_string(), "files": vigia_core::db::files_dir(&p).display().to_string()}), || p.display().to_string());
+        }
+        "today" => {
+            let s = open(a)?;
+            match publish_today(&s) {
+                Some(n) => out(a, json!({"published": n}), || i18n::tn!("cli.today.done", n)),
+                None => out(a, json!({"published": null}), || i18n::t!("cli.today.off")),
+            }
+        }
+        "sync" => {
+            let s = open(a)?;
+            match vigia_core::sync::sync_shared(&s, &otherwise_link::Root::system()).map_err(|e| e.to_string())? {
+                Some(r) => out(a, json!({"pushed": r.pushed, "pulled": r.pulled, "created": r.created, "errors": r.errors}), || i18n::t!("cli.sync.done", pushed = r.pushed, pulled = r.pulled, created = r.created)),
+                None => out(a, json!({"enabled": false}), || i18n::t!("cli.sync.off")),
+            }
+        }
+        "mcp" => {
+            let db = vigia_core::paths::resolve_db(a.db.as_deref()).ok_or_else(|| i18n::t!("cli.err.no_data_dir"))?;
+            let mut srv = mcp::Server { db, writes: a.flag("allow-writes"), publish: is_users_db(a) };
+            srv.serve(std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| e.to_string())?;
         }
         "" | "help" => println!("{}", i18n::t!("cli.usage")),
         other => return Err(i18n::t!("cli.err.unknown", cmd = other)),
