@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Vigía
+GenericName=Renewal reminders
+Comment=Never miss a renewal: documents, warranties, domains, certificates, insurance and contracts in one place
+Exec=vigia-app
+Icon=vigia
+Terminal=false
+Categories=Office;Utility;Calendar;

@@ -1,0 +1,32 @@
+[package]
+name = "vigia-app"
+description = "Vigía: never miss a renewal — documents, warranties, domains, certificates, insurance and contracts in one place"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "vigia-app"
+path = "src/main.rs"
+
+[dependencies]
+i18n.workspace = true
+vigia-core = { workspace = true, features = ["ocr"] }
+anyhow.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+# GitHub star count (one GET a day)
+ureq = { version = "3", default-features = false, features = ["rustls"] }
+gpui.workspace = true
+gpui_platform.workspace = true
+gpui-component.workspace = true
+gpui-component-assets.workspace = true
+
+# build.rs embeds the .exe icon; only pulled in when building on Windows
+[target.'cfg(windows)'.build-dependencies]
+winresource = "0.1"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc = "0.2.7"

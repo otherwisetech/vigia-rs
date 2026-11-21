@@ -1,0 +1,34 @@
+[workspace]
+resolver = "2"
+members = ["crates/i18n", "crates/core", "crates/cli", "crates/app"]
+default-members = ["crates/i18n", "crates/core", "crates/cli"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.89"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/otherwisetech/vigia-rs"
+
+[workspace.dependencies]
+vigia-core = { path = "crates/core", default-features = false }
+i18n = { path = "crates/i18n", package = "vigia-i18n" }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+# GPUI stack, same as rama-rs, nodo-rs and diskmap. Git deps move: Cargo.lock pins revs.
+gpui = { git = "https://github.com/zed-industries/zed" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }
+gpui-component = { git = "https://github.com/longbridge/gpui-component" }
+gpui-component-assets = { git = "https://github.com/longbridge/gpui-component" }
+
+[profile.dev]
+opt-level = 1
+# GPUI with debuginfo is ~10 GB of target/; keep it lean
+debug = 0
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+lto = "thin"

@@ -1,0 +1,285 @@
+# La fenêtre de Vigía.
+app.cli.usage = Usage : vigia-app [--db CHEMIN] [--demo] [--background]\nOuvre Vigía. --db utilise une autre base pour cette session seulement (non mémorisée) ; --demo ajoute des exemples si cette base est vide ; --background démarre sans fenêtre, dans la barre des menus seulement. La ligne de commande sans fenêtre est `vigia`.
+
+# menus
+app.menu.quit = Quitter {app}
+app.menu.settings = Réglages…
+app.menu.file = Fichier
+app.menu.view = Présentation
+app.menu.item = Élément
+app.menu.import_csv = Importer un CSV…
+app.menu.export_csv = Exporter en CSV…
+app.menu.export_ics = Exporter le calendrier (.ics)…
+app.menu.backup = Sauvegarder…
+app.menu.restore = Restaurer une sauvegarde…
+app.menu.open_db = Ouvrir une autre base…
+app.menu.move_db = Déplacer la base…
+app.menu.close_window = Fermer la fenêtre
+app.credit.menu = Site de {company}
+app.about.menu = À propos de {app}
+app.about.footer = {app} {version} · {company} · À propos
+app.about.description = Suit tout ce qui expire — documents, garanties, domaines, certificats, assurances et contrats — et vous prévient à temps. Tout reste sur votre ordinateur.
+app.about.by = Développé par {company}
+app.about.place = Wyoming, États-Unis
+app.about.visit = Visiter otherwisetech.com
+app.about.source = Code source
+app.about.license = MIT ou Apache-2.0
+app.star.label = Étoile sur GitHub
+app.star.tooltip = Vigía est libre et open source : une étoile aide d'autres à le trouver
+app.star.ask = Vous aimez Vigía ? Une étoile sur GitHub aide d'autres à le trouver.
+app.star.setting = Afficher les étoiles GitHub
+app.star.setting_hint = Une fois par jour, depuis api.github.com
+
+# views
+app.view.dashboard = Tableau de bord
+app.view.timeline = Chronologie
+app.view.calendar = Calendrier
+app.view.list = Tout
+app.search.menu = Rechercher
+app.search.placeholder = Rechercher…
+app.side.people = PERSONNES
+app.side.categories = CATÉGORIES
+app.items.count.one = {n} élément
+app.items.count.other = {n} éléments
+app.date.long = {day} {month} {year}
+app.date.month = {month} {year}
+app.days.none = Sans date
+app.days.today = Aujourd'hui
+app.days.tomorrow = Demain
+app.days.in.one = Dans {n} jour
+app.days.in.other = Dans {n} jours
+app.days.ago.one = Il y a {n} jour
+app.days.ago.other = Il y a {n} jours
+app.ago.now = à l'instant
+app.ago.minutes.one = il y a {n} minute
+app.ago.minutes.other = il y a {n} minutes
+app.ago.hours.one = il y a {n} heure
+app.ago.hours.other = il y a {n} heures
+app.ago.days.one = il y a {n} jour
+app.ago.days.other = il y a {n} jours
+app.wd.mon = lun
+app.wd.tue = mar
+app.wd.wed = mer
+app.wd.thu = jeu
+app.wd.fri = ven
+app.wd.sat = sam
+app.wd.sun = dim
+app.state.in_progress = Renouvellement en cours
+app.state.archived = Archivé
+app.yes = Oui
+
+# welcome
+app.welcome.title = Tout ce qui expire, au même endroit
+app.welcome.subtitle = Passeports, papiers du véhicule, garanties, domaines, certificats, assurances, contrats et obligations de l'entreprise. Vigía vous prévient à temps — 90, 30, 7 et 1 jour avant — même fenêtre fermée.
+app.welcome.try = TAPEZ EN HAUT, PAR EXEMPLE
+app.welcome.ex1 = Passeport @Ana 12/05/2031
+app.welcome.ex2 = Assurance auto dans 3 mois
+app.welcome.ex3 = mondomaine.fr 2027-08-13
+app.welcome.ex4 = Garantie frigo 15 mars 2027
+app.welcome.first = Ajouter le premier
+app.welcome.privacy = Vos données vivent dans une base SQLite sur votre ordinateur (déplaçable dans un dossier synchronisé). Le réseau ne sert qu'à vérifier les domaines et certificats que vous cochez.
+
+# quick add
+app.quick.placeholder = Ajout rapide : « Passeport @Ana 12/05/2031 » et Entrée
+app.quick.menu = Ajout rapide…
+app.quick.preview = {kind} · {name} · {date} — Entrée pour ajouter
+app.quick.no_date = sans date
+app.quick.added = Ajouté : {name} ({kind})
+app.quick.added_no_date = {name} ajouté : indiquez la date d'expiration
+
+# items
+app.item.new = Nouvel élément
+app.item.new_short = Nouveau
+app.item.edit = Modifier
+app.item.renew = Renouvelé…
+app.item.in_progress = En cours
+app.item.in_progress_on = ✓ En cours
+app.item.snooze_day = Reporter d'1 jour
+app.item.snooze_week = Reporter d'1 semaine
+app.item.snooze_month = Reporter d'1 mois
+app.item.snoozed = Rappels reportés jusqu'au {date}
+app.item.check_now = Vérifier maintenant
+app.item.archive = Archiver
+app.item.unarchive = Désarchiver
+app.item.delete = Supprimer
+app.field.kind = Type
+app.field.category = Catégorie
+app.field.name = Nom
+app.field.owner = À qui (personne, entreprise, véhicule)
+app.field.issued = Délivrance
+app.field.purchased = Achat
+app.field.expires = Expire
+app.field.end = Se termine
+app.field.notice = Préavis
+app.field.notice_by = Donner le préavis avant
+app.field.notice_days.one = {n} jour avant la fin
+app.field.notice_days.other = {n} jours avant la fin
+app.field.notice_days_label = Préavis (jours avant la fin)
+app.field.term = Garantie
+app.field.term_months = Mois de garantie
+app.field.months.one = {n} mois
+app.field.months.other = {n} mois
+app.field.recurrence = Récurrence
+app.field.cost = Coût
+app.field.currency = Devise
+app.field.provider = Fournisseur / organisme
+app.field.reference = Numéro / référence
+app.field.host = Hôte
+app.field.domain = Domaine
+app.field.tags = Étiquettes
+app.field.url = Lien de renouvellement
+app.field.auto_renews = Renouvellement automatique
+app.field.reminders = Rappels
+app.field.reminders_value = {days} jours avant
+app.field.reminders_label = Rappeler (jours avant)
+app.field.snoozed = Reporté jusqu'au
+app.field.notes = Notes
+
+# edit form
+app.edit.name_ph = Passeport, assurance auto, exemple.fr…
+app.edit.owner_ph = Ana, Société SAS, la voiture
+app.edit.date_ph = 12/05/2031, 2031-05-12, dans 3 mois
+app.edit.currency_ph = EUR, USD, CAD
+app.edit.url_ph = https://…
+app.edit.tags_ph = famille, voyage
+app.edit.host_ph = exemple.fr ou api.exemple.fr:443
+app.edit.bad_date = Date illisible : « {value} »
+app.edit.bad_number = « {value} » n'est pas un nombre
+app.edit.warranty_hint = Sans date d'expiration, c'est l'achat plus les mois de garantie.
+app.edit.wyoming_hint = Wyoming : le rapport annuel est dû le premier jour du mois anniversaire de la création. Choisissez « Chaque année, le 1er … » avec ce mois.
+app.edit.camara_hint = En Colombie l'immatriculation commerciale se renouvelle avant le 31 mars chaque année.
+app.edit.auto_check = Vérifier automatiquement chaque jour
+app.edit.rdap_hint = Interroge RDAP (rdap.org / IANA) pour la date d'expiration du domaine.
+app.edit.tls_hint = Se connecte à l'hôte (port 443) et lit la date du certificat ; rien d'autre.
+app.dialog.cancel = Annuler
+app.dialog.save = Enregistrer
+
+# panel
+app.check.title = VÉRIFICATION AUTOMATIQUE
+app.check.on = Activée, une fois par jour : {target}
+app.check.off = Désactivée (modifiez l'élément pour l'activer).
+app.check.last = Dernière vérification : {when}
+app.check.never = Jamais vérifié
+app.check.running_one = Vérification…
+app.check.running.one = Vérification de {n} élément…
+app.check.running.other = Vérification de {n} éléments…
+app.attach.title = PIÈCES JOINTES
+app.attach.drop = Déposez ici scans, PDF ou photos, ou cliquez
+app.attach.pick = Joindre
+app.attach.read = Lire les dates
+app.attach.done.one = {n} fichier joint
+app.attach.done.other = {n} fichiers joints
+app.drop.select_first = Sélectionnez un élément pour joindre des fichiers, ou déposez une image ou un PDF à lire.
+app.history.title = HISTORIQUE DES RENOUVELLEMENTS
+app.history.row = {on} : {from} → {to}
+
+# dashboard, timeline, calendar, list
+app.dash.next = PROCHAINES ÉCHÉANCES
+app.dash.reminders = RAPPELS DES 30 PROCHAINS JOURS
+app.dash.sent = RAPPELS ENVOYÉS
+app.dash.checks = VÉRIFICATIONS AUTOMATIQUES
+app.dash.on_deadline = le jour de l'échéance
+app.dash.lead.one = {n} jour avant
+app.dash.lead.other = {n} jours avant
+app.timeline.sub = Les 12 prochains mois
+app.timeline.overdue.one = {n} en retard
+app.timeline.overdue.other = {n} en retard
+app.timeline.nothing = rien à échéance
+app.timeline.undated.one = {n} élément sans date n'apparaît pas ici.
+app.timeline.undated.other = {n} éléments sans date n'apparaissent pas ici.
+app.calendar.today = Aujourd'hui
+app.calendar.more.one = +{n} autre
+app.calendar.more.other = +{n} autres
+app.list.all = Tous
+app.list.everyone = Tout le monde
+app.list.all_categories = Toutes catégories
+app.list.archived = Voir les archivés
+app.list.shown = {n} sur {total}
+app.list.empty = Pas encore d'éléments.
+app.list.no_match = Rien ne correspond aux filtres.
+
+# renew, delete
+app.renew.title = Marquer comme renouvelé
+app.renew.body = {name} expirait le {date}. Jusqu'à quand est-il valable maintenant ?
+app.renew.new_expiry = Nouvelle échéance
+app.renew.suggested = {date} · {rule}
+app.renew.cost_ph = Ce que ça a coûté
+app.renew.note = Note
+app.renew.note_ph = Rendez-vous, n° de paiement…
+app.renew.history = L'ancienne date reste dans l'historique de l'élément.
+app.renew.ok = Renouvelé
+app.renew.done = Renouvelé jusqu'au {date}
+app.delete.title = Supprimer ?
+app.delete.body = {name}, son historique et ses pièces jointes seront supprimés. Action irréversible.
+
+# files and database
+app.import.done.one = {n} élément importé
+app.import.done.other = {n} éléments importés
+app.import.done_skipped.one = {n} élément importé ({skipped} lignes sans nom ignorées)
+app.import.done_skipped.other = {n} éléments importés ({skipped} lignes sans nom ignorées)
+app.export.done = Enregistré dans {file}
+app.backup.done.one = Sauvegarde enregistrée dans {file} ({n} pièce jointe)
+app.backup.done.other = Sauvegarde enregistrée dans {file} ({n} pièces jointes)
+app.db.none = Aucune base ouverte.
+app.db.no_dir = Dossier de données de l'application introuvable.
+app.db.new = Nouvelle base…
+app.db.exists = Ce fichier existe déjà ; utilisez « Ouvrir une autre base ».
+app.db.not_vigia = Ce fichier n'est pas une base Vigía.
+app.db.opened = Base utilisée : {path}
+app.db.moved = Base déplacée vers {path}
+app.db.temporary = Cette session seulement : {rest}
+app.error.title = Impossible d'ouvrir la base
+
+# settings
+app.settings.db = BASE DE DONNÉES
+app.settings.db_hint = Un seul fichier SQLite (sans WAL), facile à garder dans Dropbox, iCloud ou Syncthing. Les pièces jointes sont à côté, dans {files}.
+app.settings.db_temporary = Ouverte avec --db : elle ne sera pas mémorisée.
+app.settings.move = Déplacer…
+app.settings.open = Ouvrir une autre…
+app.settings.reveal = Afficher dans le dossier
+app.settings.reminders = RAPPELS
+app.settings.notify = Notifications du système
+app.settings.hour = Prévenir à partir de (heure, 0–23)
+app.settings.tray = Icône dans la barre des menus
+app.settings.tray_hint = Affiche les prochaines échéances et continue à prévenir fenêtre fermée.
+app.settings.login = Ouvrir à l'ouverture de session
+app.settings.login_failed = Impossible de modifier l'ouverture automatique : {detail}
+app.settings.checks = VÉRIFICATIONS PAR LE RÉSEAU
+app.settings.auto_checks = Vérifier chaque jour les domaines et certificats cochés
+app.settings.checks_hint = Seulement pour les éléments avec « Vérifier automatiquement » : RDAP pour les domaines, une connexion TLS pour les certificats. Rien d'autre ne quitte votre ordinateur.
+app.settings.calendar = CALENDRIER
+app.settings.ics = Tenir à jour un fichier .ics pour s'y abonner
+app.settings.ics_hint = {path} — dans Calendrier : Fichier → Nouvel abonnement, avec file:// et ce chemin.
+app.settings.ocr = LECTURE DE DOCUMENTS (OCR)
+app.settings.ocr_ready = Modèles OCR prêts
+app.settings.ocr_missing = Modèles OCR non téléchargés (demandés à la première lecture d'image)
+app.settings.other = AUTRES
+
+# ocr
+app.ocr.menu = Lire un document…
+app.ocr.button = Lire un document
+app.ocr.tooltip = Photo, scan ou PDF : Vigía trouve la date d'expiration et le numéro, ici même, sans cloud
+app.ocr.reading = Lecture du document…
+app.ocr.title = Ce qui a été lu
+app.ocr.body = Depuis {file}. Vérifiez avant de l'utiliser : l'OCR peut se tromper.
+app.ocr.not_found = —
+app.ocr.nothing = Aucune date ni numéro trouvé ; vous pouvez quand même créer l'élément et le compléter.
+app.ocr.no_text = (pas de texte)
+app.ocr.local = Lu sur cet ordinateur avec ocrs ; rien n'a été envoyé nulle part.
+app.ocr.create = Créer l'élément
+app.ocr.apply = Compléter l'élément
+app.ocr.created = Élément créé avec le document joint : vérifiez les données
+app.ocr.applied = Données appliquées et document joint
+app.ocr.models_title = Télécharger les modèles OCR
+app.ocr.models_body = Pour lire les images, Vigía a besoin de deux petits modèles ocrs (environ 12 Mo), téléchargés une seule fois dans le dossier de données.
+app.ocr.models_privacy = La reconnaissance tourne sur votre ordinateur : vos documents ne sont jamais envoyés dans un cloud.
+app.ocr.models_ok = Télécharger et lire
+app.ocr.downloading = Téléchargement des modèles OCR…
+
+# menu bar
+app.tray.header = Prochaines échéances
+app.tray.empty = Rien à échéance
+app.tray.open = Ouvrir {app}
+app.tray.tooltip_ok = Vigía : tout est à jour
+app.tray.tooltip.one = Vigía : {n} demande votre attention
+app.tray.tooltip.other = Vigía : {n} demandent votre attention

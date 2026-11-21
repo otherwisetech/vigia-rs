@@ -1,0 +1,34 @@
+# The `vigia` command line.
+cli.usage = Usage: vigia [--db PATH] [--json] <command>\n\n  list [text] [--status expired|soon|upcoming|ok|undated] [--owner NAME] [--category ID] [--all]\n  due [--days 30]              what expires in the next N days (and what already did)\n  show <id>                    details, renewal history and attachments\n  add "Passport @Ana 05/12/2031"   or  add --kind passport --name … --expires …\n  edit <id> [--name … --expires … --owner … --host … --lead "90,30,7" …]\n  renew <id> [--expires DATE] [--cost N] [--note TEXT]\n  delete <id>\n  check <id> | --all           check domains (RDAP) and certificates (TLS) over the network\n  export csv|ics [FILE]        import FILE.csv        backup FILE.zip\n  kinds                        types and their default reminders\n  path                         the database in use\n\nDates: 2031-05-12, 05/12/2031, May 12 2031, "in 3 months". The database is the app's (or VIGIA_DB, or --db).
+cli.days_left.one = 1 day left
+cli.days_left.other = {n} days left
+cli.days_ago.one = 1 day ago
+cli.days_ago.other = {n} days ago
+cli.list.empty = No items.
+cli.due.none.one = Nothing expires in the next day.
+cli.due.none.other = Nothing expires in the next {n} days.
+cli.show.renewed = Renewed on {on} → {to}
+cli.add.done = Added: {line}
+cli.renew.done = {name}: renewed until {date}
+cli.delete.done = Deleted: {name}
+cli.export.done = Wrote {file}
+cli.import.done.one = Imported 1 item.
+cli.import.done.other = Imported {n} items.
+cli.backup.done.one = Backup written to {file} (1 attachment).
+cli.backup.done.other = Backup written to {file} ({n} attachments).
+
+# errors
+cli.err.needs_value = --{option} needs a value.
+cli.err.bad_date = Can't read the date “{value}”.
+cli.err.bad_number = “{value}” isn't a number.
+cli.err.bad_recurrence = Unknown recurrence “{value}” (none, every:1y, every:6m, wyoming:3, yearly:03-31).
+cli.err.bad_kind = Unknown type “{value}”. See `vigia kinds`.
+cli.err.bad_category = Unknown category “{value}”.
+cli.err.bad_status = Unknown status “{value}” (expired, soon, upcoming, ok, undated).
+cli.err.needs_id = Missing the item id (see `vigia list`).
+cli.err.no_data_dir = Couldn't find the data folder; use --db.
+cli.err.add_usage = Usage: vigia add "Passport @Ana 2031-05-12" or vigia add --kind passport --name … --expires …
+cli.err.export_usage = Usage: vigia export csv|ics [FILE]
+cli.err.import_usage = Usage: vigia import FILE.csv
+cli.err.backup_usage = Usage: vigia backup FILE.zip
+cli.err.unknown = Unknown command “{cmd}”. Try `vigia help`.

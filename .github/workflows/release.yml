@@ -1,0 +1,101 @@
+name: Release
+
+# Builds downloadable apps for macOS, Linux and Windows.
+# - push a tag like v0.2.0 → a GitHub Release with the three downloads attached
+# - "Run workflow" by hand → the same builds as workflow artifacts, no release
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            name: macos-universal
+          - os: ubuntu-22.04
+            name: linux-x86_64
+          - os: windows-latest
+            name: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: rustup show active-toolchain || rustup toolchain install
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libxcb1-dev libfontconfig1-dev libfreetype6-dev libvulkan-dev libasound2-dev \
+            libzstd-dev pkg-config
+
+      - name: Test core crates
+        run: cargo test -p vigia-i18n -p vigia-core -p vigia-cli
+
+      - name: Build (macOS universal .app)
+        if: runner.os == 'macOS'
+        run: |
+          UNIVERSAL=1 script/bundle-macos.sh
+          mkdir -p dist
+          ditto -c -k --keepParent target/release/Vigía.app dist/vigia-${{ matrix.name }}.zip
+
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cargo build -p vigia-app -p vigia-cli --release
+          pkg=vigia-${{ matrix.name }}
+          mkdir -p dist/$pkg
+          cp target/release/vigia-app target/release/vigia dist/$pkg/
+          cp packaging/linux/vigia.desktop dist/$pkg/
+          cp crates/app/assets/logo/vigia-icon-1024.png dist/$pkg/vigia.png
+          cp README.md LICENSE-MIT LICENSE-APACHE dist/$pkg/
+          tar -C dist -czf dist/$pkg.tar.gz $pkg
+          rm -rf dist/$pkg
+
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build -p vigia-app -p vigia-cli --release
+          $pkg = "vigia-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path dist/$pkg | Out-Null
+          Copy-Item target/release/vigia-app.exe, target/release/vigia.exe dist/$pkg/
+          Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE dist/$pkg/
+          Compress-Archive -Path dist/$pkg -DestinationPath dist/$pkg.zip
+          Remove-Item -Recurse dist/$pkg
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vigia-${{ matrix.name }}
+          path: dist/*
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

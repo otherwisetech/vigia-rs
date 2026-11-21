@@ -1,0 +1,285 @@
+# The Vigía window.
+app.cli.usage = Usage: vigia-app [--db PATH] [--demo] [--background]\nOpens Vigía. --db uses another database for this session only (not remembered); --demo adds sample items when that database is empty; --background starts with no window, in the menu bar only. The headless command line is `vigia`.
+
+# menus
+app.menu.quit = Quit {app}
+app.menu.settings = Settings…
+app.menu.file = File
+app.menu.view = View
+app.menu.item = Item
+app.menu.import_csv = Import CSV…
+app.menu.export_csv = Export CSV…
+app.menu.export_ics = Export calendar (.ics)…
+app.menu.backup = Back up…
+app.menu.restore = Restore backup…
+app.menu.open_db = Open another database…
+app.menu.move_db = Move the database…
+app.menu.close_window = Close window
+app.credit.menu = {company} website
+app.about.menu = About {app}
+app.about.footer = {app} {version} · {company} · About
+app.about.description = Keeps track of everything that expires — documents, warranties, domains, certificates, insurance and contracts — and reminds you in time. Everything stays on your computer.
+app.about.by = Made by {company}
+app.about.place = Wyoming, USA
+app.about.visit = Visit otherwisetech.com
+app.about.source = Source code
+app.about.license = MIT or Apache-2.0
+app.star.label = Star on GitHub
+app.star.tooltip = Vigía is free and open source: a star helps others find it
+app.star.ask = Like Vigía? A star on GitHub helps others find it.
+app.star.setting = Show GitHub stars
+app.star.setting_hint = Once a day, from api.github.com
+
+# views
+app.view.dashboard = Dashboard
+app.view.timeline = Timeline
+app.view.calendar = Calendar
+app.view.list = All items
+app.search.menu = Search
+app.search.placeholder = Search…
+app.side.people = PEOPLE
+app.side.categories = CATEGORIES
+app.items.count.one = {n} item
+app.items.count.other = {n} items
+app.date.long = {month} {day}, {year}
+app.date.month = {month} {year}
+app.days.none = No date
+app.days.today = Today
+app.days.tomorrow = Tomorrow
+app.days.in.one = In {n} day
+app.days.in.other = In {n} days
+app.days.ago.one = {n} day ago
+app.days.ago.other = {n} days ago
+app.ago.now = just now
+app.ago.minutes.one = {n} minute ago
+app.ago.minutes.other = {n} minutes ago
+app.ago.hours.one = {n} hour ago
+app.ago.hours.other = {n} hours ago
+app.ago.days.one = {n} day ago
+app.ago.days.other = {n} days ago
+app.wd.mon = Mon
+app.wd.tue = Tue
+app.wd.wed = Wed
+app.wd.thu = Thu
+app.wd.fri = Fri
+app.wd.sat = Sat
+app.wd.sun = Sun
+app.state.in_progress = Renewal in progress
+app.state.archived = Archived
+app.yes = Yes
+
+# welcome
+app.welcome.title = Everything that expires, in one place
+app.welcome.subtitle = Passports, vehicle papers, warranties, domains, certificates, insurance, contracts and company filings. Vigía reminds you in time — 90, 30, 7 and 1 day before — even with the window closed.
+app.welcome.try = TYPE ABOVE, FOR EXAMPLE
+app.welcome.ex1 = Passport @Ana 05/12/2031
+app.welcome.ex2 = Car insurance in 3 months
+app.welcome.ex3 = mydomain.com 2027-08-13
+app.welcome.ex4 = Fridge warranty Mar 15 2027
+app.welcome.first = Add the first one
+app.welcome.privacy = Your data lives in an SQLite database on your computer (you can move it to a synced folder). The network is only used to check the domains and certificates you mark.
+
+# quick add
+app.quick.placeholder = Quick add: “Passport @Ana 2031-05-12” and Enter
+app.quick.menu = Quick add…
+app.quick.preview = {kind} · {name} · {date} — Enter to add
+app.quick.no_date = no date
+app.quick.added = Added: {name} ({kind})
+app.quick.added_no_date = Added {name}: fill in the expiry date
+
+# items
+app.item.new = New item
+app.item.new_short = New
+app.item.edit = Edit
+app.item.renew = Mark renewed…
+app.item.in_progress = Renewal in progress
+app.item.in_progress_on = ✓ In progress
+app.item.snooze_day = Snooze 1 day
+app.item.snooze_week = Snooze 1 week
+app.item.snooze_month = Snooze 1 month
+app.item.snoozed = Reminders snoozed until {date}
+app.item.check_now = Check now
+app.item.archive = Archive
+app.item.unarchive = Unarchive
+app.item.delete = Delete
+app.field.kind = Type
+app.field.category = Category
+app.field.name = Name
+app.field.owner = Whose (person, company, vehicle)
+app.field.issued = Issued
+app.field.purchased = Purchased
+app.field.expires = Expires
+app.field.end = Ends
+app.field.notice = Notice
+app.field.notice_by = Give notice by
+app.field.notice_days.one = {n} day before the end
+app.field.notice_days.other = {n} days before the end
+app.field.notice_days_label = Notice period (days before the end)
+app.field.term = Warranty
+app.field.term_months = Warranty months
+app.field.months.one = {n} month
+app.field.months.other = {n} months
+app.field.recurrence = Repeats
+app.field.cost = Cost
+app.field.currency = Currency
+app.field.provider = Provider
+app.field.reference = Number / reference
+app.field.host = Host
+app.field.domain = Domain
+app.field.tags = Tags
+app.field.url = Renewal link
+app.field.auto_renews = Auto-renews
+app.field.reminders = Reminders
+app.field.reminders_value = {days} days before
+app.field.reminders_label = Remind me (days before)
+app.field.snoozed = Snoozed until
+app.field.notes = Notes
+
+# edit form
+app.edit.name_ph = Passport, car insurance, example.com…
+app.edit.owner_ph = Ana, Acme LLC, the Mazda
+app.edit.date_ph = 05/12/2031, 2031-05-12, in 3 months
+app.edit.currency_ph = USD, EUR, COP
+app.edit.url_ph = https://…
+app.edit.tags_ph = family, travel
+app.edit.host_ph = example.com or api.example.com:443
+app.edit.bad_date = Can't read the date “{value}”
+app.edit.bad_number = “{value}” isn't a number
+app.edit.warranty_hint = Without an expiry date, it's the purchase date plus the warranty months.
+app.edit.wyoming_hint = Wyoming: the annual report is due on the first day of the formation anniversary month. Pick “Yearly, on … 1st” with that month.
+app.edit.camara_hint = In Colombia the business registration is renewed by March 31 every year.
+app.edit.auto_check = Check automatically every day
+app.edit.rdap_hint = Asks RDAP (rdap.org / IANA) for the domain's expiry date.
+app.edit.tls_hint = Connects to the host (port 443) and reads the certificate's date; nothing else.
+app.dialog.cancel = Cancel
+app.dialog.save = Save
+
+# panel
+app.check.title = AUTOMATIC CHECK
+app.check.on = On, once a day: {target}
+app.check.off = Off (edit the item to turn it on).
+app.check.last = Last checked {when}
+app.check.never = Never checked
+app.check.running_one = Checking…
+app.check.running.one = Checking {n} item…
+app.check.running.other = Checking {n} items…
+app.attach.title = ATTACHMENTS
+app.attach.drop = Drop scans, PDFs or photos here, or click
+app.attach.pick = Attach
+app.attach.read = Read dates
+app.attach.done.one = {n} file attached
+app.attach.done.other = {n} files attached
+app.drop.select_first = Select an item to attach files, or drop an image or PDF to read it.
+app.history.title = RENEWAL HISTORY
+app.history.row = {on}: {from} → {to}
+
+# dashboard, timeline, calendar, list
+app.dash.next = NEXT DEADLINES
+app.dash.reminders = REMINDERS IN THE NEXT 30 DAYS
+app.dash.sent = REMINDERS SENT
+app.dash.checks = AUTOMATIC CHECKS
+app.dash.on_deadline = on the deadline
+app.dash.lead.one = {n} day before
+app.dash.lead.other = {n} days before
+app.timeline.sub = The next 12 months
+app.timeline.overdue.one = {n} overdue
+app.timeline.overdue.other = {n} overdue
+app.timeline.nothing = nothing due
+app.timeline.undated.one = {n} item without a date isn't shown here.
+app.timeline.undated.other = {n} items without a date aren't shown here.
+app.calendar.today = Today
+app.calendar.more.one = +{n} more
+app.calendar.more.other = +{n} more
+app.list.all = All
+app.list.everyone = Everyone
+app.list.all_categories = All categories
+app.list.archived = Show archived
+app.list.shown = {n} of {total}
+app.list.empty = No items yet.
+app.list.no_match = Nothing matches the filters.
+
+# renew, delete
+app.renew.title = Mark as renewed
+app.renew.body = {name} was due {date}. Until when is it valid now?
+app.renew.new_expiry = New expiry
+app.renew.suggested = {date} · {rule}
+app.renew.cost_ph = What it cost
+app.renew.note = Note
+app.renew.note_ph = Appointment, receipt number…
+app.renew.history = The previous date stays in the item's history.
+app.renew.ok = Renewed
+app.renew.done = Renewed until {date}
+app.delete.title = Delete?
+app.delete.body = {name}, its history and its attachments will be deleted. This can't be undone.
+
+# files and database
+app.import.done.one = Imported {n} item
+app.import.done.other = Imported {n} items
+app.import.done_skipped.one = Imported {n} item ({skipped} rows without a name skipped)
+app.import.done_skipped.other = Imported {n} items ({skipped} rows without a name skipped)
+app.export.done = Saved to {file}
+app.backup.done.one = Backup saved to {file} ({n} attachment)
+app.backup.done.other = Backup saved to {file} ({n} attachments)
+app.db.none = No database is open.
+app.db.no_dir = Couldn't find the app's data folder.
+app.db.new = New database…
+app.db.exists = That file already exists; use “Open another database”.
+app.db.not_vigia = That file isn't a Vigía database.
+app.db.opened = Using {path}
+app.db.moved = Database moved to {path}
+app.db.temporary = This session only: {rest}
+app.error.title = Couldn't open the database
+
+# settings
+app.settings.db = DATABASE
+app.settings.db_hint = A single SQLite file (no WAL), easy to keep in Dropbox, iCloud or Syncthing. Attachments sit next to it, in {files}.
+app.settings.db_temporary = Opened with --db: it won't be remembered.
+app.settings.move = Move…
+app.settings.open = Open another…
+app.settings.reveal = Show in folder
+app.settings.reminders = REMINDERS
+app.settings.notify = System notifications
+app.settings.hour = Remind from (hour, 0–23)
+app.settings.tray = Menu-bar icon
+app.settings.tray_hint = Shows the next deadlines and keeps reminding you with the window closed.
+app.settings.login = Open at login
+app.settings.login_failed = Couldn't change launch at login: {detail}
+app.settings.checks = NETWORK CHECKS
+app.settings.auto_checks = Check marked domains and certificates daily
+app.settings.checks_hint = Only for items with “Check automatically”: RDAP for domains, a TLS connection for certificates. Nothing else leaves your computer.
+app.settings.calendar = CALENDAR
+app.settings.ics = Keep an .ics file up to date to subscribe to
+app.settings.ics_hint = {path} — in Calendar: File → New Calendar Subscription, with file:// and that path.
+app.settings.ocr = DOCUMENT READING (OCR)
+app.settings.ocr_ready = OCR models ready
+app.settings.ocr_missing = OCR models not downloaded (asked the first time you read an image)
+app.settings.other = OTHER
+
+# ocr
+app.ocr.menu = Read a document…
+app.ocr.button = Read document
+app.ocr.tooltip = Photo, scan or PDF: Vigía finds the expiry date and number, right here, no cloud
+app.ocr.reading = Reading the document…
+app.ocr.title = What was read
+app.ocr.body = From {file}. Check it before using it: OCR can be wrong.
+app.ocr.not_found = —
+app.ocr.nothing = No dates or numbers found; you can still create the item and fill it in.
+app.ocr.no_text = (no text)
+app.ocr.local = Read on this computer with ocrs; nothing was sent anywhere.
+app.ocr.create = Create item
+app.ocr.apply = Fill in the item
+app.ocr.created = Item created with the document attached: check the details
+app.ocr.applied = Details applied and document attached
+app.ocr.models_title = Download the OCR models
+app.ocr.models_body = To read images, Vigía needs two small ocrs models (about 12 MB). They're downloaded once into the data folder.
+app.ocr.models_privacy = Recognition runs on your computer: your documents are never uploaded to any cloud.
+app.ocr.models_ok = Download and read
+app.ocr.downloading = Downloading the OCR models…
+
+# menu bar
+app.tray.header = Next deadlines
+app.tray.empty = Nothing due
+app.tray.open = Open {app}
+app.tray.tooltip_ok = Vigía: all up to date
+app.tray.tooltip.one = Vigía: {n} needs attention
+app.tray.tooltip.other = Vigía: {n} need attention

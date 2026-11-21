@@ -1,0 +1,24 @@
+{
+  "objectClassName": "domain",
+  "handle": "2336799_DOMAIN_COM-VRSN",
+  "ldhName": "EXAMPLE.COM",
+  "links": [{"value": "https://rdap.verisign.com/com/v1/domain/EXAMPLE.COM", "rel": "self", "href": "https://rdap.verisign.com/com/v1/domain/EXAMPLE.COM", "type": "application/rdap+json"}],
+  "status": ["client delete prohibited", "client transfer prohibited", "client update prohibited"],
+  "entities": [
+    {
+      "objectClassName": "entity",
+      "handle": "376",
+      "roles": ["registrar"],
+      "publicIds": [{"type": "IANA Registrar ID", "identifier": "376"}],
+      "vcardArray": ["vcard", [["version", {}, "text", "4.0"], ["fn", {}, "text", "Example Registrar, Inc."]]]
+    }
+  ],
+  "events": [
+    {"eventAction": "registration", "eventDate": "1997-08-13T04:00:00Z"},
+    {"eventAction": "expiration", "eventDate": "2027-08-13T04:00:00Z"},
+    {"eventAction": "last update of RDAP database", "eventDate": "2026-11-20T10:00:00Z"}
+  ],
+  "secureDNS": {"delegationSigned": true},
+  "nameservers": [{"objectClassName": "nameserver", "ldhName": "A.IANA-SERVERS.NET"}],
+  "rdapConformance": ["rdap_level_0", "icann_rdap_technical_implementation_guide_0", "icann_rdap_response_profile_0"]
+}
