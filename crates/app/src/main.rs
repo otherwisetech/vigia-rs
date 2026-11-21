@@ -11,6 +11,7 @@ mod macos;
 mod panel;
 mod star;
 mod state;
+mod storage_ui;
 mod system;
 mod theme;
 mod ui;
@@ -58,10 +59,14 @@ pub(crate) fn set_app_menus(cx: &mut App) {
             MenuItem::action(i18n::t!("app.menu.export_csv"), ExportCsv),
             MenuItem::action(i18n::t!("app.menu.export_ics"), ExportIcs),
             MenuItem::separator(),
+            MenuItem::action(i18n::t!("app.menu.open_db"), OpenDb),
+            MenuItem::submenu(Menu { name: i18n::t!("app.menu.open_recent").into(), items: storage_ui::recent_menu(), disabled: false }),
+            MenuItem::action(i18n::t!("app.menu.save_as"), SaveDbAs),
+            MenuItem::action(i18n::t!("app.menu.move_db"), MoveDb),
+            MenuItem::action(storage_ui::reveal_label(), RevealDb),
+            MenuItem::separator(),
             MenuItem::action(i18n::t!("app.menu.backup"), Backup),
             MenuItem::action(i18n::t!("app.menu.restore"), Restore),
-            MenuItem::action(i18n::t!("app.menu.open_db"), OpenDb),
-            MenuItem::action(i18n::t!("app.menu.move_db"), MoveDb),
             MenuItem::separator(),
             MenuItem::action(i18n::t!("app.menu.close_window"), CloseWindow),
         ],
@@ -320,6 +325,7 @@ fn tick(cx: &mut App, n: u64) {
     if n.is_multiple_of(120) {
         d.update(cx, |d, cx| d.run_due_checks(cx));
     }
+    d.update(cx, |d, cx| d.heartbeat(cx));
     // the Today feed follows the date; the shared registry after edits and every 5 minutes
     d.update(cx, |d, cx| {
         d.publish_today();
@@ -375,6 +381,10 @@ fn main() {
         std::process::exit(1);
     };
     let mut data = state::Data::open(db_path, temporary);
+    // 0.2.1: the default moved to the Otherwise data folder; ask once (never for --db / VIGIA_DB)
+    if !temporary && std::env::var_os("VIGIA_DB").is_none_or(|v| v.is_empty()) {
+        data.migration = vigia_core::paths::pending_migration(&settings, vigia_core::paths::legacy_default_db().as_deref(), vigia_core::paths::default_db().as_deref());
+    }
     // demo items only into a database given with --db, and only when it's empty
     if opts.demo && temporary && data.items.is_empty()
         && let Some(s) = &data.store

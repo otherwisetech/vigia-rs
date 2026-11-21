@@ -9,6 +9,8 @@ use vigia_core::calendars::Calendar;
 use vigia_core::entity::{Entity as Ent, EntityId, Relation, Role};
 use vigia_core::model::{Item, ItemId, State};
 use vigia_core::settings::Settings;
+use otherwise_link::lock::{Lock, LockInfo, Scope};
+use otherwise_link::storage;
 
 pub struct Data {
     pub store: Option<Store>,
@@ -32,6 +34,36 @@ pub struct Data {
     /// An edit since the last sync with the shared registry; a sync is running.
     pub sync_dirty: bool,
     syncing: bool,
+    /// Held while the file is open, so another computer (synced folder) or process sees it.
+    lock: Option<Lock>,
+    /// The file is open on another computer / in another process: not opened.
+    pub blocked: Option<LockInfo>,
+    /// Cloud folder and conflicted copies of the open file.
+    pub storage: Option<storage::Status>,
+    /// The question of the first launch of 0.2.1 (move to the Otherwise data folder).
+    pub migration: Option<vigia_core::paths::Migration>,
+    last_beat: std::time::Instant,
+}
+
+/// Why another database couldn't be opened.
+pub enum SwitchError {
+    /// Open on another computer or in another process; the user may take it over.
+    Locked(LockInfo),
+    Failed(String),
+}
+
+pub fn locked_message(i: &LockInfo) -> String {
+    if i.host == otherwise_link::lock::host_name() { i18n::t!("app.db.locked_here") } else { i18n::t!("app.db.locked_elsewhere", host = i.host.clone()) }
+}
+
+fn lock(path: &Path, force: bool) -> Result<Lock, SwitchError> {
+    if force {
+        return Lock::take_over(path, vigia_core::sync::APP, Scope::Process).map_err(|e| SwitchError::Failed(e.to_string()));
+    }
+    Lock::acquire(path, vigia_core::sync::APP, Scope::Process).map_err(|h| match h.info() {
+        Some(i) => SwitchError::Locked(i.clone()),
+        None => SwitchError::Failed(String::new()),
+    })
 }
 
 const LIVE_ICS: &str = "live_ics:";
@@ -46,15 +78,68 @@ pub fn data(cx: &App) -> Entity<Data> {
 
 impl Data {
     pub fn open(path: PathBuf, temporary: bool) -> Data {
-        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), calendars: Vec::new(), live_ics: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new(), last_feed: String::new(), sync_dirty: true, syncing: false };
-        match Store::open_or_create(&path) {
-            Ok(s) => {
-                d.store = Some(s);
-                d.reload();
-            }
-            Err(e) => d.error = Some(e.to_string()),
+        let mut d = Data { store: None, path, temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), calendars: Vec::new(), live_ics: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new(), last_feed: String::new(), sync_dirty: true, syncing: false, lock: None, blocked: None, storage: None, migration: None, last_beat: std::time::Instant::now() };
+        d.open_store(false);
+        if d.store.is_some() && !temporary {
+            d.note_recent();
         }
         d
+    }
+
+    /// (Re)opens `self.path`: lock first, then the database.
+    fn open_store(&mut self, force: bool) {
+        self.store = None;
+        self.lock = None;
+        self.blocked = None;
+        match lock(&self.path, force) {
+            Ok(l) => match Store::open_or_create(&self.path) {
+                Ok(s) => {
+                    self.store = Some(s);
+                    self.lock = Some(l);
+                    self.error = None;
+                    self.reload();
+                }
+                Err(e) => self.error = Some(e.to_string()),
+            },
+            Err(SwitchError::Locked(i)) => {
+                self.error = Some(locked_message(&i));
+                self.blocked = Some(i);
+            }
+            Err(SwitchError::Failed(e)) => self.error = Some(e),
+        }
+        self.storage = Some(storage::status(&self.path));
+    }
+
+    /// "Use it here anyway" after the open-elsewhere notice.
+    pub fn take_over(&mut self, cx: &mut Context<Self>) {
+        self.open_store(true);
+        self.changed(cx);
+    }
+
+    /// Keeps the lock fresh; when another computer took the file over, stops using it.
+    pub fn heartbeat(&mut self, cx: &mut Context<Self>) {
+        if self.last_beat.elapsed() < otherwise_link::lock::HEARTBEAT_EVERY {
+            return;
+        }
+        self.last_beat = std::time::Instant::now();
+        if let Some(l) = self.lock.as_mut()
+            && let Err(h) = l.heartbeat()
+        {
+            self.store = None;
+            if let Some(l) = self.lock.take() {
+                l.forget();
+            }
+            if let Some(i) = h.info() {
+                self.error = Some(locked_message(i));
+                self.blocked = Some(i.clone());
+            }
+            cx.notify();
+        }
+        let st = storage::status(&self.path);
+        if self.storage.as_ref() != Some(&st) {
+            self.storage = Some(st);
+            cx.notify();
+        }
     }
 
     pub fn today() -> Date {
@@ -324,40 +409,85 @@ impl Data {
 
     // ── which database ───────────────────────────────────────────────────────────────────────
 
-    fn remember(&self) {
-        if !self.temporary {
-            let p = self.path.display().to_string();
-            Settings::update(|s| s.db_path = Some(p));
-        }
+    fn note_recent(&self) {
+        let p = self.path.clone();
+        Settings::update(|s| {
+            let mut r = s.recent_dbs();
+            vigia_core::paths::push_recent(&mut r, &p);
+            s.recent_dbs = Some(r);
+        });
     }
 
-    /// Opens another database (creating it when the file doesn't exist) and remembers it.
-    pub fn switch_to(&mut self, path: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
-        let store = Store::open_or_create(&path).map_err(|e| e.to_string())?;
+    /// The default database is remembered as "no choice", so it follows the Otherwise data
+    /// folder when that moves.
+    fn remember(&self) {
+        if self.temporary {
+            return;
+        }
+        let p = self.path.clone();
+        let default = vigia_core::paths::default_db();
+        Settings::update(|s| {
+            s.db_path = (default.as_deref() != Some(p.as_path())).then(|| p.display().to_string());
+            let mut r = s.recent_dbs();
+            vigia_core::paths::push_recent(&mut r, &p);
+            s.recent_dbs = Some(r);
+        });
+    }
+
+    fn adopt(&mut self, store: Store, lock: Lock, path: PathBuf, cx: &mut Context<Self>) {
         self.store = Some(store);
+        self.lock = Some(lock);
         self.path = path;
         self.temporary = false;
         self.error = None;
+        self.blocked = None;
+        self.storage = Some(storage::status(&self.path));
         self.remember();
         self.changed(cx);
+    }
+
+    /// Opens another database (creating it when the file doesn't exist) and remembers it.
+    /// `force`: take it over even if it's open elsewhere (after the user confirmed).
+    pub fn switch_to(&mut self, path: PathBuf, force: bool, cx: &mut Context<Self>) -> Result<(), SwitchError> {
+        let l = if path == self.path && self.lock.is_some() { self.lock.take().ok_or(SwitchError::Failed(String::new()))? } else { lock(&path, force)? };
+        let store = Store::open_or_create(&path).map_err(|e| SwitchError::Failed(e.to_string()))?;
+        self.adopt(store, l, path, cx);
         Ok(())
     }
 
-    /// Moves the database and its attachments to `dest` and keeps using it there.
+    /// "Save As": a verified copy (with the attachments) at `dest`, which becomes the open one;
+    /// the original stays as it was.
+    pub fn save_as(&mut self, dest: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
+        let l = lock(&dest, false).map_err(|e| match e {
+            SwitchError::Locked(i) => locked_message(&i),
+            SwitchError::Failed(m) => m,
+        })?;
+        let store = db::copy_database(&self.path, &dest).map_err(|e| e.to_string())?;
+        self.adopt(store, l, dest, cx);
+        Ok(())
+    }
+
+    /// Moves the database and its attachments to `dest` (verified copy, then the originals are
+    /// removed) and keeps using it there.
     pub fn move_to(&mut self, dest: PathBuf, cx: &mut Context<Self>) -> Result<(), String> {
         let from = self.path.clone();
+        let new_lock = lock(&dest, false).map_err(|e| match e {
+            SwitchError::Locked(i) => locked_message(&i),
+            SwitchError::Failed(m) => m,
+        })?;
         // close it first: Windows can't copy / delete an open file
         self.store = None;
+        let old_lock = self.lock.take();
         match db::move_database(&from, &dest) {
             Ok(s) => {
-                self.store = Some(s);
-                self.path = dest;
-                self.remember();
-                self.changed(cx);
+                drop(old_lock);
+                self.adopt(s, new_lock, dest, cx);
                 Ok(())
             }
             Err(e) => {
+                drop(new_lock);
                 self.store = Store::open(&from).ok();
+                self.lock = old_lock;
                 cx.notify();
                 Err(e.to_string())
             }

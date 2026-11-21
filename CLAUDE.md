@@ -30,6 +30,8 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
               (reminders every 30 s, checks hourly), menu-bar pump; state.rs: `Data` entity held
               by the app (not the window) so reminders run with the window closed; app.rs:
               window, top bar + quick add, sidebar, footer, About, file actions, OCR flow;
+              storage_ui.rs: Save As / Move / Show in Finder / Open Recent + Locate, lock
+              notice, migration question;
               views.rs: dashboard / timeline / calendar / list (+ holidays / overlay menu);
               entities.rs: entity page + form; graph.rs: the map canvas; panel.rs: item detail + edit
               form; dialogs.rs: renew, delete, settings, OCR; macos.rs: NSStatusItem (from
@@ -39,9 +41,16 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
 
 ## Rules
 
-- **The database is the user's.** Default `<data dir>/vigia.db`; Settings can move it (copy,
-  verify, then remove the original) or open another; the last one is remembered in
-  `settings.json` (`db_path`). `--db PATH` is session-only and never remembered; `--demo` only
+- **The database is the user's.** Default `<Otherwise data root>/vigia/vigia.db`
+  (`paths::default_db`, otherwise-link `app_dir`; remembered as "no choice" so it follows the
+  root); before 0.2.1 it was `<data dir>/vigia.db`, and the first window asks once
+  (`paths::pending_migration`, `Dialog::Migrate`; answer in `settings.storage_migration`).
+  File → Save As (`db::copy_database`) / Move To (`db::move_database`: verified copy with
+  otherwise-link `storage`, originals removed only afterwards) / Show in Finder / Open another /
+  Open Recent (`recent_dbs`, Locate… for missing ones); a custom choice is remembered in
+  `settings.json` (`db_path`). While open the file holds an otherwise-link lock
+  (`<db>.lock.json`, heartbeat in the tick); open elsewhere → the "open on <host>" notice,
+  never written without "Use here anyway". `--db PATH` is session-only and never remembered; `--demo` only
   seeds a database given with `--db` that is empty. Never put demo data in the default database.
   Every change is written right away in small transactions; `journal_mode=DELETE` (never WAL) so
   it can sit in a synced folder. Schema changes are a new entry at the end of `db::MIGRATIONS`

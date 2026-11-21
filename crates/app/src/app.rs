@@ -35,6 +35,17 @@ actions!(
         Restore,
         OpenDb,
         MoveDb,
+        SaveDbAs,
+        RevealDb,
+        ClearRecent,
+        OpenRecent0,
+        OpenRecent1,
+        OpenRecent2,
+        OpenRecent3,
+        OpenRecent4,
+        OpenRecent5,
+        OpenRecent6,
+        OpenRecent7,
         CloseWindow,
         ShowDashboard,
         ShowTimeline,
@@ -200,6 +211,7 @@ impl VigiaApp {
         crate::star::refresh(Settings::load().github_stars(), cx);
         let title = window_title(data.read(cx));
         window.set_window_title(&title);
+        let migration = data.read(cx).migration.clone();
         VigiaApp {
             data,
             view: View::from_id(Settings::load().view.as_deref().unwrap_or_default()),
@@ -211,7 +223,7 @@ impl VigiaApp {
             entity_edit: None,
             graph: crate::graph::GraphState::default(),
             holidays: Settings::load().holiday_countries(),
-            dialog: None,
+            dialog: migration.map(Dialog::Migrate),
             about: false,
             toast: None,
             logo: Arc::new(Image::from_bytes(ImageFormat::Png, crate::ICON_PNG.to_vec())),
@@ -511,24 +523,33 @@ impl VigiaApp {
     }
 
     pub fn move_db(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.save_file("vigia.db".into(), window, cx, |this, p, window, cx| { // i18n-ok: file name
+        let name = self.data.read(cx).path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| vigia_core::paths::DB_FILE.into());
+        self.save_file(name, window, cx, |this, p, window, cx| {
             let p = if p.extension().is_none() { p.with_extension(vigia_core::db::EXTENSION) } else { p };
+            if p.exists() {
+                return this.toast(i18n::t!("app.db.exists"), cx);
+            }
             match this.data.update(cx, |d, cx| d.move_to(p.clone(), cx)) {
                 Ok(()) => {
                     this.toast(i18n::t!("app.db.moved", path = p.display()), cx);
                     let t = window_title(this.data.read(cx));
                     window.set_window_title(&t);
+                    crate::set_app_menus(cx);
                 }
                 Err(e) => this.toast(e, cx),
             }
         });
     }
 
-    fn switch_db(&mut self, p: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+    pub fn switch_db(&mut self, p: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        self.switch_db_forced(p, false, window, cx);
+    }
+
+    pub fn switch_db_forced(&mut self, p: PathBuf, force: bool, window: &mut Window, cx: &mut Context<Self>) {
         if p.exists() && !vigia_core::db::is_vigia(&p) {
             return self.toast(i18n::t!("app.db.not_vigia"), cx);
         }
-        match self.data.update(cx, |d, cx| d.switch_to(p.clone(), cx)) {
+        match self.data.update(cx, |d, cx| d.switch_to(p.clone(), force, cx)) {
             Ok(()) => {
                 self.selected = None;
                 self.edit = None;
@@ -536,8 +557,13 @@ impl VigiaApp {
                 self.toast(i18n::t!("app.db.opened", path = p.display()), cx);
                 let t = window_title(self.data.read(cx));
                 window.set_window_title(&t);
+                crate::set_app_menus(cx);
             }
-            Err(e) => self.toast(e, cx),
+            Err(state::SwitchError::Locked(info)) => {
+                self.dialog = Some(Dialog::Locked { path: p, info });
+                cx.notify();
+            }
+            Err(state::SwitchError::Failed(e)) => self.toast(e, cx),
         }
     }
 
@@ -821,6 +847,7 @@ impl VigiaApp {
 
     fn render_failed(&self, t: &Tokens, message: &str, cx: &mut Context<Self>) -> impl IntoElement {
         let path = self.data.read(cx).path.display().to_string();
+        let blocked = self.data.read(cx).blocked.is_some();
         div()
             .flex()
             .flex_col()
@@ -837,8 +864,10 @@ impl VigiaApp {
                     .flex()
                     .gap(px(8.))
                     .child(ui::outline_button(t, "err-new").child(i18n::t!("app.db.new")).on_click(cx.listener(|this, _, window, cx| this.new_db(window, cx))))
-                    .child(ui::filled_button(t, "err-open", t.accent).child(i18n::t!("app.menu.open_db")).on_click(cx.listener(|this, _, window, cx| this.open_db(window, cx)))),
+                    .child(ui::filled_button(t, "err-open", t.accent).child(i18n::t!("app.menu.open_db")).on_click(cx.listener(|this, _, window, cx| this.open_db(window, cx))))
+                    .when(blocked, |d| d.child(ui::outline_button(t, "err-take-over").child(i18n::t!("app.db.take_over")).on_click(cx.listener(|this, _, _, cx| this.data.update(cx, |d, cx| d.take_over(cx)))))),
             )
+            .when(blocked, |d| d.child(div().max_w(px(520.)).text_center().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.db.locked_hint"))))
     }
 
     /// Slim bar at the bottom: the database on the left, About on the right.
@@ -849,6 +878,7 @@ impl VigiaApp {
         if d.temporary {
             left = i18n::t!("app.db.temporary", rest = left);
         }
+        let note = self.storage_note(cx);
         let checking = d.checking.len();
         let ink = t.ink;
         div()
@@ -864,6 +894,7 @@ impl VigiaApp {
             .text_size(px(11.))
             .text_color(t.ink_muted)
             .child(div().flex_1().min_w_0().truncate().child(left))
+            .children(note.map(|(n, warn)| div().flex_none().text_color(if warn { t.danger } else { t.ink_muted }).child(n)))
             .when(checking > 0, |d| d.child(i18n::tn!("app.check.running", checking)))
             .child(crate::star::footer_link(t, cx))
             .child(
@@ -1000,6 +1031,17 @@ impl Render for VigiaApp {
             .on_action(cx.listener(|this, _: &Restore, window, cx| this.restore(window, cx)))
             .on_action(cx.listener(|this, _: &OpenDb, window, cx| this.open_db(window, cx)))
             .on_action(cx.listener(|this, _: &MoveDb, window, cx| this.move_db(window, cx)))
+            .on_action(cx.listener(|this, _: &SaveDbAs, window, cx| this.save_db_as(window, cx)))
+            .on_action(cx.listener(|this, _: &RevealDb, _, cx| this.reveal_db(cx)))
+            .on_action(cx.listener(|this, _: &ClearRecent, _, cx| this.clear_recent(cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent0, window, cx| this.open_recent(0, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent1, window, cx| this.open_recent(1, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent2, window, cx| this.open_recent(2, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent3, window, cx| this.open_recent(3, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent4, window, cx| this.open_recent(4, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent5, window, cx| this.open_recent(5, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent6, window, cx| this.open_recent(6, window, cx)))
+            .on_action(cx.listener(|this, _: &OpenRecent7, window, cx| this.open_recent(7, window, cx)))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .on_action(cx.listener(|this, _: &ShowDashboard, _, cx| this.set_view(View::Dashboard, cx)))
             .on_action(cx.listener(|this, _: &ShowTimeline, _, cx| this.set_view(View::Timeline, cx)))

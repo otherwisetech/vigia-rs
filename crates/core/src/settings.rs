@@ -30,6 +30,11 @@ pub struct Settings {
     pub today_feed: Option<bool>,
     /// The executable `otherwise-vigia://` was last registered for (Windows / Linux).
     pub link_registered: Option<String>,
+    /// The answer to "move the database to the Otherwise data folder?" (0.2.1): `moved`, `kept`
+    /// or `use-new`. Absent: not asked yet.
+    pub storage_migration: Option<String>,
+    /// Databases opened recently, most recent first.
+    pub recent_dbs: Option<Vec<String>>,
 }
 
 impl Settings {
@@ -87,6 +92,10 @@ impl Settings {
         self.holidays.iter().flatten().filter_map(|c| crate::holidays::Country::from_id(c)).collect()
     }
 
+    pub fn recent_dbs(&self) -> Vec<String> {
+        self.recent_dbs.clone().unwrap_or_default()
+    }
+
     pub fn remind_hour(&self) -> u32 {
         self.remind_hour.unwrap_or(9).min(23)
     }
@@ -98,7 +107,7 @@ mod tests {
 
     #[test]
     fn roundtrip_and_defaults() {
-        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30), holidays: Some(vec!["co".into(), "mars".into(), "us-wy".into()]), today_feed: Some(false), link_registered: Some("/x/vigia-app".into()) };
+        let s = Settings { language: Some("pt".into()), db_path: Some("/x/vigia.db".into()), github_stars: Some(false), notify: Some(false), tray: Some(false), auto_checks: Some(false), ics_sync: Some(true), ics_path: Some("/x/v.ics".into()), view: Some("timeline".into()), remind_hour: Some(30), holidays: Some(vec!["co".into(), "mars".into(), "us-wy".into()]), today_feed: Some(false), link_registered: Some("/x/vigia-app".into()), storage_migration: Some("moved".into()), recent_dbs: Some(vec!["/x/a.db".into()]) };
         assert_eq!(Settings::parse(&s.to_json()), s);
         assert!(!s.github_stars() && !s.notify() && !s.tray() && !s.auto_checks() && s.ics_sync() && !s.today_feed());
         assert_eq!(s.remind_hour(), 23);
