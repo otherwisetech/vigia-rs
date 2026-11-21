@@ -73,11 +73,15 @@ engine, for scripts and AI agents.
   are downloaded once when you first ask); PDFs from their text layer. Nothing goes to any cloud.
 - **Import / export**: CSV both ways, an **.ics** export, and an .ics file kept up to date that
   your calendar app can subscribe to (Settings → Calendar).
-- **Your data, one file**: a local **SQLite** database, by default in the app's data folder
-  (`~/Library/Application Support/Vigia/vigia.db` on macOS, `%APPDATA%\Vigia` on Windows,
-  `~/.local/share/vigia` on Linux). Plain rollback journal (no WAL), so it can live in Dropbox,
-  iCloud or Syncthing: Settings → *Database location* moves it (with its attachments) or opens
-  another `.db`; the last one is remembered. Attachments sit next to it in `vigia-files/`,
+- **Your data, one file**: a local **SQLite** database, by default in the Otherwise data folder
+  shared by all Otherwise apps (`~/.otherwise/vigia/vigia.db`; move that folder, e.g. to
+  OneDrive, from Otherwise Apps → Settings). Versions before 0.2.1 used
+  `~/Library/Application Support/Vigia/vigia.db` (`%APPDATA%\Vigia`, `~/.local/share/vigia`):
+  the first launch offers to move it, verified, with its attachments. Plain rollback journal (no
+  WAL), so it can live in Dropbox, iCloud, OneDrive or Syncthing; a lock file shows when it is
+  open on another computer and conflicted copies are flagged. File → *Save As…*, *Move Database
+  To…*, *Show in Finder*, *Open Another Database…* and *Open Recent* (with *Locate…* for missing
+  ones); a custom location is remembered. Attachments sit next to it in `vigia-files/`,
   referenced by relative path. Integrity check on open, forward-only migrations. **Back up**
   writes a zip of the database and the attachments; *Restore* unpacks one and opens it.
 

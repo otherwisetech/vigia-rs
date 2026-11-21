@@ -690,47 +690,49 @@ fn unique_name(dir: &Path, name: &str) -> String {
     (2..).map(|i| format!("{stem} ({i}){ext}")).find(|n| !dir.join(n).exists()).unwrap_or_else(|| name.to_string())
 }
 
-/// Moves the database (and its attachments folder) to `dest`: copies, opens the copy to
-/// verify it, then removes the originals. The store must be dropped by the caller first; the
-/// returned store is the one at `dest`.
-pub fn move_database(from: &Path, dest: &Path) -> Result<Store> {
+/// Copies the database and its attachments folder to `dest` and opens the copy ("Save As"). The
+/// copy is verified (otherwise-link `storage::copy_sqlite`: snapshot, integrity check, same
+/// content; files byte-compared) and nothing at the destination is overwritten; on failure
+/// whatever was copied is removed again.
+pub fn copy_database(from: &Path, dest: &Path) -> Result<Store> {
     if dest.exists() {
         return Err(StoreError::Io(std::io::Error::new(std::io::ErrorKind::AlreadyExists, dest.display().to_string())));
     }
-    if let Some(d) = dest.parent() {
-        std::fs::create_dir_all(d)?;
-    }
-    std::fs::copy(from, dest)?;
+    otherwise_link::storage::copy_sqlite(from, dest)?;
     let (src_files, dst_files) = (files_dir(from), files_dir(dest));
+    let mut copied = Vec::new();
     if src_files.is_dir() && src_files != dst_files {
-        copy_dir(&src_files, &dst_files)?;
-    }
-    let store = match Store::open(dest) {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = std::fs::remove_file(dest);
-            return Err(e);
+        match otherwise_link::storage::copy_tree(&src_files, &dst_files) {
+            Ok(c) => copied = c,
+            Err(e) => {
+                let _ = otherwise_link::storage::remove_sqlite(dest);
+                return Err(e.into());
+            }
         }
-    };
-    let _ = std::fs::remove_file(from);
+    }
+    match Store::open(dest) {
+        Ok(s) => Ok(s),
+        Err(e) => {
+            let _ = otherwise_link::storage::remove_sqlite(dest);
+            for f in copied {
+                let _ = std::fs::remove_file(f);
+            }
+            Err(e)
+        }
+    }
+}
+
+/// Moves the database (and its attachments folder) to `dest`: [`copy_database`], then removes
+/// the originals, only once the copy verified and opened. The caller must drop its store (and
+/// release its lock) first; the returned store is the one at `dest`.
+pub fn move_database(from: &Path, dest: &Path) -> Result<Store> {
+    let store = copy_database(from, dest)?;
+    otherwise_link::storage::remove_sqlite(from)?;
+    let (src_files, dst_files) = (files_dir(from), files_dir(dest));
     if src_files.is_dir() && src_files != dst_files {
         let _ = std::fs::remove_dir_all(&src_files);
     }
     Ok(store)
-}
-
-pub fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
-    std::fs::create_dir_all(to)?;
-    for e in std::fs::read_dir(from)? {
-        let e = e?;
-        let p = e.path();
-        if p.is_dir() {
-            copy_dir(&p, &to.join(e.file_name()))?;
-        } else {
-            std::fs::copy(&p, to.join(e.file_name()))?;
-        }
-    }
-    Ok(())
 }
 
 /// Whether a file looks like a Vigía database (for the "open another" picker).
@@ -954,5 +956,39 @@ mod tests {
         assert!(move_database(&dest, &dest).is_err());
         assert_eq!(sanitize("../a:b?.pdf"), "_a_b_.pdf");
         assert_eq!(sanitize(".."), "file");
+    }
+
+    #[test]
+    fn save_as_and_migration_from_the_old_default() {
+        let dir = tempfile::tempdir().unwrap();
+        // the pre-0.2.1 default with an attachment
+        let legacy = dir.path().join("Application Support/Vigia/vigia.db");
+        let s = Store::create(&legacy).unwrap();
+        let id = s.insert(&sample()).unwrap();
+        let src = dir.path().join("soat.pdf");
+        std::fs::write(&src, b"%PDF").unwrap();
+        s.attach(id, &src).unwrap();
+        // Save As: a verified copy, the original untouched
+        let copy = dir.path().join("Dropbox/vigia copy.db");
+        let c = copy_database(&legacy, &copy).unwrap();
+        assert_eq!(c.items().unwrap().len(), 1);
+        assert!(legacy.exists() && files_dir(&legacy).join(id.to_string()).join("soat.pdf").exists());
+        assert!(copy_database(&legacy, &copy).is_err(), "never overwrites");
+        drop((s, c));
+        // not a Vigía file: refused, nothing left behind
+        let other = dir.path().join("other.db");
+        rusqlite::Connection::open(&other).unwrap().execute_batch("CREATE TABLE t(x)").unwrap();
+        let bad = dir.path().join("out/other.db");
+        assert!(matches!(copy_database(&other, &bad), Err(StoreError::NotVigia)));
+        assert!(!bad.exists());
+        // the migration: everything arrives, the old place is emptied only afterwards
+        let new = dir.path().join(".otherwise/vigia/vigia.db");
+        let s = move_database(&legacy, &new).unwrap();
+        let a = &s.attachments(id).unwrap()[0];
+        assert_eq!(std::fs::read(s.attachment_path(a)).unwrap(), b"%PDF");
+        assert_eq!(s.items().unwrap()[0].name, sample().name);
+        assert!(!legacy.exists() && !files_dir(&legacy).exists());
+        let mode: String = s.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
+        assert_eq!(mode, "delete");
     }
 }

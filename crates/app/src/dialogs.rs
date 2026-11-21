@@ -36,10 +36,16 @@ pub enum Dialog {
     /// The models must be downloaded before reading an image.
     OcrModels { path: PathBuf, target: Option<ItemId> },
     Ocr { path: PathBuf, target: Option<ItemId>, ex: Extracted, text: String },
+    /// 0.2.1: move the database from the old default to the Otherwise data folder?
+    Migrate(vigia_core::paths::Migration),
+    /// The database to open is in use on another computer / in another process.
+    Locked { path: PathBuf, info: otherwise_link::lock::LockInfo },
+    /// A recent database that isn't there any more.
+    Missing { path: PathBuf },
 }
 
 /// Title, body, OK label, danger, OK action.
-type Parts = (String, AnyElement, String, bool, fn(&mut VigiaApp, &mut Window, &mut Context<VigiaApp>));
+pub(crate) type Parts = (String, AnyElement, String, bool, fn(&mut VigiaApp, &mut Window, &mut Context<VigiaApp>));
 
 impl VigiaApp {
     pub fn open_renew(&mut self, id: ItemId, window: &mut Window, cx: &mut Context<Self>) {
@@ -182,7 +188,9 @@ impl VigiaApp {
         let d = self.dialog.as_ref()?;
         let text = |s: String| div().text_size(px(13.)).line_height(px(19.)).text_color(t.ink_muted).child(s);
         let label = |s: String| div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).child(s);
+        let alt = Self::storage_dialog_alt(d);
         let (title, body, ok_label, danger, ok): Parts = match d {
+            Dialog::Migrate(_) | Dialog::Locked { .. } | Dialog::Missing { .. } => self.storage_dialog(d, t)?,
             Dialog::Renew { id, expires, cost, note, .. } => {
                 let it = self.data.read(cx).item(*id).cloned().unwrap_or_default();
                 let today = Data::today();
@@ -274,6 +282,7 @@ impl VigiaApp {
                 let db_path = data.path.display().to_string();
                 let files = data.files_dir().display().to_string();
                 let temporary = data.temporary;
+                let storage_note = self.storage_note(cx);
                 let ics = Data::ics_path().map(|p| p.display().to_string()).unwrap_or_default();
                 let small_btn = |id: &'static str| ui::outline_button(t, id).h(px(28.)).px(px(10.)).text_size(px(12.));
                 let models = vigia_core::ocr::models_present();
@@ -283,6 +292,7 @@ impl VigiaApp {
                     .gap(px(10.))
                     .child(ui::section_title(t, i18n::t!("app.settings.db")))
                     .child(div().p(px(8.)).rounded(px(6.)).bg(t.canvas).text_size(px(12.)).child(db_path))
+                    .children(storage_note.map(|(n, warn)| div().text_size(px(12.)).text_color(if warn { t.danger } else { t.ink_muted }).child(n)))
                     .child(hint(i18n::t!("app.settings.db_hint", files = files)))
                     .when(temporary, |d| d.child(hint(i18n::t!("app.settings.db_temporary"))))
                     .child(
@@ -290,14 +300,12 @@ impl VigiaApp {
                             .flex()
                             .flex_wrap()
                             .gap(px(6.))
+                            .child(small_btn("db-save-as").child(i18n::t!("app.menu.save_as")).on_click(cx.listener(|this, _, window, cx| this.save_db_as(window, cx))))
                             .child(small_btn("db-move").child(i18n::t!("app.settings.move")).on_click(cx.listener(|this, _, window, cx| this.move_db(window, cx))))
                             .child(small_btn("db-open").child(i18n::t!("app.settings.open")).on_click(cx.listener(|this, _, window, cx| this.open_db(window, cx))))
                             .child(small_btn("db-new").child(i18n::t!("app.db.new")).on_click(cx.listener(|this, _, window, cx| this.new_db(window, cx))))
                             .child(small_btn("db-backup").child(i18n::t!("app.menu.backup")).on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::app::Backup), cx))))
-                            .child(small_btn("db-reveal").child(i18n::t!("app.settings.reveal")).on_click(cx.listener(|this, _, _, cx| {
-                                let p = this.data.read(cx).path.clone();
-                                cx.reveal_path(&p);
-                            }))),
+                            .child(small_btn("db-reveal").child(crate::storage_ui::reveal_label()).on_click(cx.listener(|this, _, _, cx| this.reveal_db(cx)))),
                     )
                     .child(ui::section_title(t, i18n::t!("app.settings.reminders")))
                     .child(check("set-notify", i18n::t!("app.settings.notify"), f.notify, |f, v| f.notify = v))
@@ -344,7 +352,7 @@ impl VigiaApp {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(title))
             .child(body)
-            .child(div().flex().justify_end().gap(px(8.)).child(ui::outline_button(t, "dialog-cancel").child(i18n::t!("app.dialog.cancel")).on_click(cx.listener(move |this, _, _, cx| close(this, cx)))).child(ok_btn));
+            .child(div().flex().justify_end().gap(px(8.)).child(ui::outline_button(t, "dialog-cancel").child(i18n::t!("app.dialog.cancel")).on_click(cx.listener(move |this, _, _, cx| close(this, cx)))).children(alt.map(|(l, f)| ui::outline_button(t, "dialog-alt").child(l).on_click(cx.listener(move |this, _, window, cx| f(this, window, cx))))).child(ok_btn));
         Some(ui::backdrop(t, "dialog-backdrop").on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| close(this, cx))).child(card).into_any_element())
     }
 }
