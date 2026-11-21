@@ -4,7 +4,7 @@ members = ["crates/i18n", "crates/core", "crates/cli", "crates/app"]
 default-members = ["crates/i18n", "crates/core", "crates/cli"]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.89"
 license = "MIT OR Apache-2.0"
@@ -17,6 +17,9 @@ anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+# Shared layer of the Otherwise apps: deep links, Today feed, entity registry (by tag, never a branch)
+uuid = { version = "1", features = ["v4"] }
+otherwise-link = { git = "https://github.com/otherwisetech/otherwise-link", tag = "v0.1.0" }
 # GPUI stack, same as rama-rs, nodo-rs and diskmap. Git deps move: Cargo.lock pins revs.
 gpui = { git = "https://github.com/zed-industries/zed" }
 gpui_platform = { git = "https://github.com/zed-industries/zed", features = ["font-kit"] }

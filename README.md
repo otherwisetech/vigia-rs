@@ -111,6 +111,9 @@ vigia entities --kind vehicle         # people, vehicles, companies… with thei
 vigia entity "Otherwise SAS"          # details, links and items; --name/--kind/--ident… to edit
 vigia relate Juan "Otherwise SAS" --role owner
 vigia holidays --country co --year 2026
+vigia today                           # publish what's due to Otherwise Apps' Today view
+vigia sync                            # sync entities with the shared registry (when turned on)
+vigia mcp                             # MCP server on stdio (read-only; --allow-writes adds writes)
 ```
 
 JSON items carry `id`, `kind`, `name`, `owner`, `owner_kind`, `entity_id`, `category`, `issued`, `expires`, `due` (the day
@@ -118,6 +121,43 @@ to act: the expiry, or the notice deadline of a contract), `days_left`, `status`
 `recurrence`, `business_days`, cost, provider, reference, tags, lead days, host and check
 results. CSV has `owner_kind` and `business_days` columns; .ics events name the owner and its
 kind.
+
+## Otherwise Apps
+
+Vigía plugs into [otherwise-link](https://github.com/otherwisetech/otherwise-link), the shared
+layer of the Otherwise Technologies apps. Everything stays on the computer.
+
+- **Deep links.** The app registers `otherwise-vigia://` (and answers `otherwise://vigia/…`
+  through Otherwise Apps): macOS through the bundle's `Info.plist`, Linux through
+  `packaging/linux/io.github.otherwisetech.vigia-app.desktop` (`MimeType=x-scheme-handler/…`,
+  `Exec=… %u`), Windows through `HKCU\Software\Classes` on first start.
+
+  | Link | Opens |
+  |------|-------|
+  | `otherwise://vigia` | the window |
+  | `otherwise://vigia/item/<id>` | an item |
+  | `otherwise://vigia/owner/<id>` | an entity's page (Vigía's id) |
+  | `otherwise://vigia/entity/<uuid>` | the entity linked to a shared card |
+  | `otherwise://vigia/new?kind=certificate&name=…&owner=…&expires=YYYY-MM-DD&host=…` | the new-item form, prefilled (also `text` = a quick-add line, `owner_kind`, `entity`, `issued`, `months`, `provider`, `reference`, `url`, `notes`, `tags`, `check=1`); nothing is saved until you do |
+
+- **Today.** What is overdue or due in the next 30 days goes to `today/vigia.json`, which
+  Otherwise Apps shows in its Today view, each with a link to the item. Rewritten when it
+  changes; Settings → *Show what's due in the Today view* turns it off (and removes the file).
+  `vigia today` publishes it from the command line.
+- **Shared entities** (only when turned on in Otherwise Apps). People, companies, vehicles,
+  properties and digital assets are synced both ways with the shared registry: matched by card
+  id, by Vigía's ref, by tax id / plate / domain, else by name, so nothing is duplicated. Edits
+  in other apps land here; merges made in Otherwise Apps are followed; a card deleted there
+  leaves the entity in Vigía (detached), and deleting an entity here only unlinks it. Pets and
+  "other" stay local. `vigia sync` runs it from the command line; the app syncs after edits
+  and every 5 minutes.
+- **MCP.** `vigia mcp` is a stdio MCP server, read-only: `list_items`, `due`, `entities`, `item`.
+  With `--allow-writes` (which Otherwise Apps' hub passes only when you allow write tools) it
+  adds `add_item` and `renew_item`.
+
+  ```bash
+  claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Apps' hub
+  ```
 
 ## Privacy
 

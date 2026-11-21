@@ -4736,6 +4736,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "otherwise-link"
+version = "0.1.0"
+source = "git+https://github.com/otherwisetech/otherwise-link?tag=v0.1.0#0b2969806dcac2adc79c9f21f6bd72a98d8e0be2"
+dependencies = [
+ "chrono",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7657,7 +7669,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigia-app"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7666,8 +7678,10 @@ dependencies = [
  "gpui-component-assets",
  "gpui_platform",
  "objc",
+ "otherwise-link",
  "serde_json",
  "ureq",
+ "uuid",
  "vigia-core",
  "vigia-i18n",
  "winresource",
@@ -7675,9 +7689,10 @@ dependencies = [
 
 [[package]]
 name = "vigia-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
+ "otherwise-link",
  "serde_json",
  "tempfile",
  "vigia-core",
@@ -7686,11 +7701,12 @@ dependencies = [
 
 [[package]]
 name = "vigia-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "image",
  "ocrs",
+ "otherwise-link",
  "pdf-extract",
  "rten",
  "rusqlite",
@@ -7699,13 +7715,14 @@ dependencies = [
  "serde_json",
  "tempfile",
  "ureq",
+ "uuid",
  "vigia-i18n",
  "zip",
 ]
 
 [[package]]
 name = "vigia-i18n"
-version = "0.1.0"
+version = "0.2.0"
 
 [[package]]
 name = "vswhom"

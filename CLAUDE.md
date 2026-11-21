@@ -18,10 +18,13 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               occurrences), backup.rs (zip), settings.rs, paths.rs, demo.rs, entity.rs (owners:
               kinds, plate / legal-suffix inference, find by name / ident, relations), graph.rs
               (map layout + camera math, deterministic), holidays.rs (computed public holidays,
-              business-day shift), calendars.rs (read-only .ics overlays)
+              business-day shift), calendars.rs (read-only .ics overlays); otherwise-link
+              integration: links.rs (deep-link routes, `new?…` prefill), feed.rs (Today
+              events), sync.rs (two-way sync with the shared entity registry)
 crates/i18n   vigia-i18n: embedded translation catalogs, t!/tn!/tv! macros, i18n guard tests
 crates/cli    `vigia`: list / due / show / add / edit / renew / delete / check / export /
-              import / backup / kinds / entities / entity / relate / holidays / path, `--json`
+              import / backup / kinds / entities / entity / relate / holidays / today / sync /
+              path / mcp (mcp.rs: stdio MCP server, read-only unless --allow-writes), `--json`
               everywhere
 crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, background tick
               (reminders every 30 s, checks hourly), menu-bar pump; state.rs: `Data` entity held
@@ -59,6 +62,11 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   use `i18n::t!` / `tn!` and add the key to **every** `crates/i18n/locales/<lang>/` catalog in the
   same change. Untranslatable literals end their line with `// i18n-ok`. The guard also fails on
   catalog keys no code uses.
+- **Otherwise Apps integration is opt-in or read-only.** The Today feed and the registry
+  follow only the user's own database (never `--db`); the registry is touched only when
+  `hub.json` has `entities: true` (`Registry::open_shared`); `vigia mcp` writes only with
+  `--allow-writes`. Tests use `Root::at(tempdir)`, never the real shared folder. The
+  otherwise-link dependency is a git tag; bumping it must only change its own Cargo.lock entry.
 - Every core change ships with a test on synthetic data. Tests must pass on macOS, Linux and
   Windows: no assumptions about installed tools, paths, locale or time zone (pass `today`).
 - In app test modules don't `use super::*` (gpui's glob exports its own `test` attribute).

@@ -27,6 +27,11 @@ pub struct Data {
     pub checking: HashSet<ItemId>,
     /// Reminders sent this session, newest first: (item, title, body).
     pub recent: Vec<(ItemId, String, String)>,
+    /// What was last written to the Today feed (JSON of the events, or "off").
+    last_feed: String,
+    /// An edit since the last sync with the shared registry; a sync is running.
+    pub sync_dirty: bool,
+    syncing: bool,
 }
 
 const LIVE_ICS: &str = "live_ics:";
@@ -41,7 +46,7 @@ pub fn data(cx: &App) -> Entity<Data> {
 
 impl Data {
     pub fn open(path: PathBuf, temporary: bool) -> Data {
-        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), calendars: Vec::new(), live_ics: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new() };
+        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), calendars: Vec::new(), live_ics: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new(), last_feed: String::new(), sync_dirty: true, syncing: false };
         match Store::open_or_create(&path) {
             Ok(s) => {
                 d.store = Some(s);
@@ -182,11 +187,85 @@ impl Data {
         self.changed(cx);
     }
 
-    /// Something changed: reload, refresh the calendar file, tell the views.
+    /// Something changed: reload, refresh the calendar file and the Today feed, tell the views.
     fn changed(&mut self, cx: &mut Context<Self>) {
         self.reload();
         self.sync_ics();
+        self.publish_today();
+        self.sync_dirty = true;
         cx.notify();
+    }
+
+    /// The local entity behind a shared card id (following merges in the registry when the
+    /// card isn't linked here directly).
+    pub fn entity_for_shared(&self, id: uuid::Uuid) -> Option<EntityId> {
+        let find = |u: uuid::Uuid| self.entities.iter().find(|e| e.shared.as_deref() == Some(&u.to_string())).map(|e| e.id);
+        if let Some(e) = find(id) {
+            return Some(e);
+        }
+        let reg = otherwise_link::registry::Registry::open_shared(&otherwise_link::Root::system()).ok()?;
+        let live = reg.resolve(id).ok().flatten()?;
+        if let Some(e) = find(live) {
+            return Some(e);
+        }
+        let uid = self.store.as_ref()?.meta("shared_uid").ok().flatten()?;
+        let card = reg.get(live).ok().flatten()?;
+        let local = vigia_core::sync::parse_ref(card.refs.get(vigia_core::sync::APP)?, &uid)?;
+        self.entity(local).map(|e| e.id)
+    }
+
+    /// Rewrites Vigía's file of the Today view when what it would say changed. Only for the
+    /// user's own database (never one opened with `--db`).
+    pub fn publish_today(&mut self) {
+        if self.temporary || self.store.is_none() {
+            return;
+        }
+        let root = otherwise_link::Root::system();
+        if !Settings::load().today_feed() {
+            if self.last_feed != "off" {
+                let _ = vigia_core::feed::clear(&root);
+                self.last_feed = "off".into();
+            }
+            return;
+        }
+        let events = vigia_core::feed::events(&self.items, &self.entities, Self::today());
+        let sig = serde_json::to_string(&events).unwrap_or_default();
+        if sig != self.last_feed && otherwise_link::today::publish(&root, vigia_core::sync::APP, &events).is_ok() {
+            self.last_feed = sig;
+        }
+    }
+
+    /// Syncs entities with the shared registry in the background (nothing happens unless the
+    /// user turned it on in Otherwise Apps). Results land in the database and reload the views.
+    pub fn sync_shared(&mut self, cx: &mut Context<Self>) {
+        if self.temporary || self.syncing || self.store.is_none() {
+            return;
+        }
+        self.syncing = true;
+        self.sync_dirty = false;
+        let path = self.path.clone();
+        let task = cx.background_executor().spawn(async move {
+            let store = Store::open(&path).map_err(|e| e.to_string())?;
+            vigia_core::sync::sync_shared(&store, &otherwise_link::Root::system()).map_err(|e| e.to_string())
+        });
+        cx.spawn(async move |this, cx| {
+            let r = task.await;
+            this.update(cx, |this, cx| {
+                this.syncing = false;
+                match r {
+                    Ok(Some(rep)) if rep.pulled + rep.created > 0 => {
+                        this.reload();
+                        this.sync_ics();
+                        this.publish_today();
+                        cx.notify();
+                    }
+                    Ok(_) => {}
+                    Err(e) => eprintln!("{e}"),
+                }
+            })
+            .ok();
+        })
+        .detach();
     }
 
     /// Inserts (id 0) or updates; returns the id.

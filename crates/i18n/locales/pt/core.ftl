@@ -168,3 +168,6 @@ core.biz.weekends_only = só fins de semana
 core.biz.previous = Dia útil anterior ({holidays})
 core.biz.next = Próximo dia útil ({holidays})
 core.cal.not_ics = Isso não é um arquivo iCalendar (.ics).
+
+# shared registry of the Otherwise apps
+core.sync.error = Registro compartilhado: {detail}

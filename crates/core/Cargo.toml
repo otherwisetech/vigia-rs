@@ -20,6 +20,8 @@ i18n.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 chrono.workspace = true
+otherwise-link.workspace = true
+uuid.workspace = true
 rusqlite = { version = "0.37", features = ["bundled"] }
 # RDAP lookups (https) and the OCR model download; nothing else talks to the network
 ureq = { version = "3", default-features = false, features = ["rustls"] }
