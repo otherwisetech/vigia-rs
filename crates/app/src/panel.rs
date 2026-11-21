@@ -13,6 +13,7 @@ use gpui_component::input::{Input, InputState, Textarea, TextareaState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use gpui_component::{IconName, Sizable as _};
 use vigia_core::date::{self, Date};
+use vigia_core::entity::{self, EntityKind};
 use vigia_core::model::{Category, Item, ItemId, Kind, Recurrence, State, Unit, leads_text, parse_leads};
 
 pub const PANEL_W: f32 = 380.;
@@ -38,6 +39,8 @@ pub struct EditForm {
     pub auto_check: bool,
     pub name: Entity<InputState>,
     pub owner: Entity<InputState>,
+    /// The kind picked for a new owner; `None` until the user picks (then it's guessed).
+    pub owner_kind: Option<EntityKind>,
     pub issued: Entity<InputState>,
     pub expires: Entity<InputState>,
     pub term: Entity<InputState>,
@@ -85,7 +88,8 @@ impl VigiaApp {
         name.update(cx, |s, cx| s.focus(window, cx));
         let expires = mk(d2s(it.expires), date_ph.clone(), window, cx);
         let issued = mk(d2s(it.issued), date_ph, window, cx);
-        let subs = vec![cx.observe(&expires, |_, _, cx| cx.notify()), cx.observe(&issued, |_, _, cx| cx.notify())];
+        let owner = mk(it.owner.clone(), i18n::t!("app.edit.owner_ph"), window, cx);
+        let subs = vec![cx.observe(&expires, |_, _, cx| cx.notify()), cx.observe(&issued, |_, _, cx| cx.notify()), cx.observe(&owner, |_, _, cx| cx.notify())];
         EditForm {
             id: it.id,
             kind: it.kind,
@@ -94,7 +98,8 @@ impl VigiaApp {
             auto_renews: it.auto_renews,
             auto_check: it.auto_check,
             name,
-            owner: mk(it.owner.clone(), i18n::t!("app.edit.owner_ph"), window, cx),
+            owner,
+            owner_kind: None,
             issued,
             expires,
             term: mk(it.term_months.map(|v| v.to_string()).unwrap_or_default(), String::new(), window, cx),
@@ -114,7 +119,19 @@ impl VigiaApp {
     }
 
     pub fn start_new(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let f = self.form_from(Item::new(Kind::Custom, ""), window, cx);
+        self.start_new_for(None, window, cx);
+    }
+
+    /// A new item, already belonging to `owner` (from an entity's page).
+    pub fn start_new_for(&mut self, owner: Option<&vigia_core::entity::Entity>, window: &mut Window, cx: &mut Context<Self>) {
+        let mut it = Item::new(Kind::Custom, "");
+        if let Some(e) = owner {
+            it.owner = e.name.clone();
+            it.entity = Some(e.id);
+            it.owner_kind = Some(e.kind);
+        }
+        self.entity_edit = None;
+        let f = self.form_from(it, window, cx);
         self.edit = Some(f);
         cx.notify();
     }
@@ -173,7 +190,12 @@ impl VigiaApp {
             if it.name.is_empty() {
                 it.name = f.kind.label();
             }
-            it.owner = val(&f.owner);
+            let owner = val(&f.owner);
+            if owner.to_lowercase() != f.base.owner.trim().to_lowercase() {
+                it.entity = None;
+                it.owner_kind = Some(f.owner_kind.unwrap_or_else(|| entity::guess(&owner, Some(f.kind))));
+            }
+            it.owner = owner;
             it.issued = parse_date(&f.issued)?;
             it.expires = parse_date(&f.expires)?;
             it.term_months = num(&f.term)?;
@@ -210,6 +232,9 @@ impl VigiaApp {
 
     pub fn render_panel(&mut self, t: &Tokens, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let _ = window;
+        if self.entity_edit.is_some() {
+            return Some(self.render_entity_form(t, cx).into_any_element());
+        }
         if self.edit.is_some() {
             return Some(self.render_form(t, cx).into_any_element());
         }
@@ -415,7 +440,23 @@ impl VigiaApp {
                 this.selected = None;
                 cx.notify();
             }))))
-            .when(!it.owner.is_empty(), |d| d.child(div().flex().items_center().gap(px(6.)).text_size(px(13.)).text_color(t.ink_muted).child(icon(IconName::User, 13., t.ink_muted)).child(it.owner.clone())))
+            .when(!it.owner.is_empty(), |d| {
+                let ent = it.entity;
+                let accent = t.accent;
+                d.child(
+                    div()
+                        .id("detail-owner")
+                        .flex()
+                        .items_center()
+                        .gap(px(6.))
+                        .text_size(px(13.))
+                        .text_color(t.ink_muted)
+                        .child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 13., t.ink_muted))
+                        .child(it.owner.clone())
+                        .child(div().text_size(px(11.5)).child(format!("· {}", it.owner_kind.unwrap_or_default().label()))) // i18n-ok: separator
+                        .when_some(ent, |d, id| d.cursor_pointer().hover(move |s| s.text_color(accent).underline()).on_click(cx.listener(move |this, _, _, cx| this.open_entity(id, cx)))),
+                )
+            })
             .child(div().flex().flex_wrap().gap(px(6.)).child(ui::chip(it.kind.label(), t.accent, 11.5)).child(ui::chip(it.category.label(), t.ink_muted, 11.5)).when(in_progress, |d| d.child(ui::chip(i18n::t!("app.state.in_progress"), t.accent, 11.5))).when(archived, |d| d.child(ui::chip(i18n::t!("app.state.archived"), t.ink_muted, 11.5))))
             .child(
                 div()
@@ -510,6 +551,35 @@ impl VigiaApp {
             }
             menu
         });
+        let typed = f.owner.read(cx).value().trim().to_string();
+        let owner_hint: Option<AnyElement> = if typed.is_empty() {
+            None
+        } else {
+            let ents = &self.data.read(cx).entities;
+            match entity::find(ents, &typed) {
+                Some(e) => Some(div().flex().items_center().gap(px(5.)).text_size(px(11.5)).text_color(t.ink_muted).child(ui::entity_icon(e.kind, 12., t.ink_muted)).child(i18n::t!("app.edit.owner_existing", name = e.name, kind = e.kind.label())).into_any_element()),
+                None => {
+                    let cur = f.owner_kind.unwrap_or_else(|| entity::guess(&typed, Some(f.kind)));
+                    let weak = cx.entity().downgrade();
+                    let picker = Button::new("form-owner-kind").outline().xsmall().label(cur.label()).dropdown_menu(move |mut menu, _, _| {
+                        for k in EntityKind::ALL {
+                            let w = weak.clone();
+                            menu = menu.item(PopupMenuItem::new(k.label()).checked(k == cur).on_click(move |_, _, cx| {
+                                w.update(cx, |this, cx| {
+                                    if let Some(f) = this.edit.as_mut() {
+                                        f.owner_kind = Some(k);
+                                    }
+                                    cx.notify();
+                                })
+                                .ok();
+                            }));
+                        }
+                        menu
+                    });
+                    Some(div().flex().items_center().gap(px(6.)).text_size(px(11.5)).text_color(t.ink_muted).child(ui::entity_icon(cur, 12., t.ink_muted)).child(i18n::t!("app.edit.owner_new")).child(picker).into_any_element())
+                }
+            }
+        };
         let kind = f.kind;
         let mut form = div()
             .flex()
@@ -521,6 +591,7 @@ impl VigiaApp {
             .child(half(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.kind"))).child(kind_btn), div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.category"))).child(cat_btn)))
             .child(field(i18n::t!("app.field.name"), &f.name))
             .child(field(i18n::t!("app.field.owner"), &f.owner))
+            .children(owner_hint)
             .child(half(date_field(if kind == Kind::Warranty { i18n::t!("app.field.purchased") } else { i18n::t!("app.field.issued") }, &f.issued), date_field(i18n::t!("app.field.expires"), &f.expires)));
         if kind == Kind::Warranty {
             form = form.child(field(i18n::t!("app.field.term_months"), &f.term)).child(div().text_size(px(11.)).text_color(t.ink_muted).child(i18n::t!("app.edit.warranty_hint")));

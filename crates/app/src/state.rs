@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use vigia_core::date::{self, Date};
 use vigia_core::db::{self, Store};
+use vigia_core::entity::{Entity as Ent, EntityId, Relation, Role};
 use vigia_core::model::{Item, ItemId, State};
 use vigia_core::settings::Settings;
 
@@ -15,6 +16,8 @@ pub struct Data {
     pub temporary: bool,
     pub error: Option<String>,
     pub items: Vec<Item>,
+    pub entities: Vec<Ent>,
+    pub relations: Vec<Relation>,
     pub attach_counts: HashMap<ItemId, usize>,
     pub generation: u64,
     pub checking: HashSet<ItemId>,
@@ -32,7 +35,7 @@ pub fn data(cx: &App) -> Entity<Data> {
 
 impl Data {
     pub fn open(path: PathBuf, temporary: bool) -> Data {
-        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new() };
+        let mut d = Data { store: None, path: path.clone(), temporary, error: None, items: Vec::new(), entities: Vec::new(), relations: Vec::new(), attach_counts: HashMap::new(), generation: 0, checking: HashSet::new(), recent: Vec::new() };
         match Store::open_or_create(&path) {
             Ok(s) => {
                 d.store = Some(s);
@@ -53,12 +56,47 @@ impl Data {
             Ok(v) => self.items = v,
             Err(e) => self.error = Some(e.to_string()),
         }
+        self.entities = s.entities().unwrap_or_default();
+        self.relations = s.relations().unwrap_or_default();
         self.attach_counts = s.attachment_counts().unwrap_or_default();
         self.generation += 1;
     }
 
     pub fn item(&self, id: ItemId) -> Option<&Item> {
         self.items.iter().find(|i| i.id == id)
+    }
+
+    pub fn entity(&self, id: EntityId) -> Option<&Ent> {
+        self.entities.iter().find(|e| e.id == id)
+    }
+
+    /// Inserts (id 0) or updates; returns the id.
+    pub fn save_entity(&mut self, e: Ent, cx: &mut Context<Self>) -> Result<EntityId, String> {
+        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
+        let id = if e.id == 0 { s.insert_entity(&e).map_err(|x| x.to_string())? } else { s.update_entity(&e).map(|_| e.id).map_err(|x| x.to_string())? };
+        self.changed(cx);
+        Ok(id)
+    }
+
+    pub fn delete_entity(&mut self, id: EntityId, cx: &mut Context<Self>) {
+        if let Some(s) = &self.store {
+            let _ = s.delete_entity(id);
+        }
+        self.changed(cx);
+    }
+
+    pub fn relate(&mut self, from: EntityId, to: EntityId, role: Role, cx: &mut Context<Self>) -> Result<(), String> {
+        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
+        s.relate(from, to, role).map_err(|e| e.to_string())?;
+        self.changed(cx);
+        Ok(())
+    }
+
+    pub fn unrelate(&mut self, id: i64, cx: &mut Context<Self>) {
+        if let Some(s) = &self.store {
+            let _ = s.unrelate(id);
+        }
+        self.changed(cx);
     }
 
     /// Something changed: reload, refresh the calendar file, tell the views.

@@ -4,6 +4,7 @@
 //! user_version`. Attachments live in `vigia-files/` next to the file, referenced by relative
 //! path.
 use crate::date::{self, Date};
+use crate::entity::{self, Entity, EntityId, EntityKind, Relation, Role};
 use crate::model::*;
 use crate::reminder::Reminder;
 use rusqlite::{Connection, OptionalExtension, Row, params};
@@ -40,7 +41,46 @@ pub const MIGRATIONS: &[&str] = &[
        lead INTEGER NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (item, deadline, lead));
      CREATE INDEX attachments_item ON attachments(item);
      CREATE INDEX renewals_item ON renewals(item, on_date);",
+    // 2: what items belong to (people, vehicles, companies…) and how those relate; the old
+    // free-text owners become entities in `backfill_entities`
+    "CREATE TABLE entities (
+       id INTEGER PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL, ident TEXT NOT NULL DEFAULT '',
+       detail TEXT NOT NULL DEFAULT '', year INTEGER, country TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+       created INTEGER NOT NULL DEFAULT 0, updated INTEGER NOT NULL DEFAULT 0);
+     CREATE TABLE relations (
+       id INTEGER PRIMARY KEY, from_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+       to_id INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE, role TEXT NOT NULL DEFAULT 'owner',
+       UNIQUE (from_id, to_id));
+     ALTER TABLE items ADD COLUMN entity_id INTEGER REFERENCES entities(id) ON DELETE SET NULL;
+     CREATE INDEX items_entity ON items(entity_id);",
 ];
+
+/// Version 2: each distinct owner (case-insensitively) becomes an entity, its kind inferred
+/// from the name (plate → vehicle, legal suffix → company, domain → digital, else a person).
+fn backfill_entities(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    let rows: Vec<(i64, String)> = {
+        let mut st = tx.prepare("SELECT id, owner FROM items WHERE trim(owner) != '' ORDER BY id")?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+    };
+    let mut made: Vec<(String, i64)> = Vec::new();
+    let now = now_secs();
+    for (item, owner) in rows {
+        let name = owner.trim().to_string();
+        let key = name.to_lowercase();
+        let id = match made.iter().find(|(k, _)| *k == key) {
+            Some((_, id)) => *id,
+            None => {
+                let e = Entity::new(entity::infer(&name).unwrap_or(EntityKind::Person), name.clone());
+                tx.execute("INSERT INTO entities (kind, name, ident, created, updated) VALUES (?1, ?2, ?3, ?4, ?4)", params![e.kind.id(), e.name, e.ident, now])?;
+                let id = tx.last_insert_rowid();
+                made.push((key, id));
+                id
+            }
+        };
+        tx.execute("UPDATE items SET entity_id = ?2, owner = ?3 WHERE id = ?1", params![item, id, name])?;
+    }
+    Ok(())
+}
 
 pub fn latest_version() -> i64 {
     MIGRATIONS.len() as i64
@@ -57,6 +97,8 @@ pub enum StoreError {
     /// `PRAGMA integrity_check` failed.
     Corrupt(String),
     NotFound(ItemId),
+    /// An entity can't be related to itself.
+    SelfRelation,
 }
 
 impl std::fmt::Display for StoreError {
@@ -69,6 +111,7 @@ impl std::fmt::Display for StoreError {
             StoreError::TooNew(v) => write!(f, "{}", i18n::t!("core.db.too_new", version = v)),
             StoreError::Corrupt(d) => write!(f, "{}", i18n::t!("core.db.corrupt", detail = d)),
             StoreError::NotFound(id) => write!(f, "{}", i18n::t!("core.db.not_found", id = id)),
+            StoreError::SelfRelation => write!(f, "{}", i18n::t!("core.db.self_relation")),
         }
     }
 }
@@ -111,7 +154,24 @@ pub fn files_dir(db: &Path) -> PathBuf {
     db.parent().unwrap_or(Path::new(".")).join(FILES_DIR)
 }
 
-const ITEM_COLS: &str = "id, kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated";
+const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind";
+const ITEM_FROM: &str = "items i LEFT JOIN entities e ON e.id = i.entity_id";
+const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated";
+
+fn entity_from_row(r: &Row) -> rusqlite::Result<Entity> {
+    Ok(Entity {
+        id: r.get(0)?,
+        kind: EntityKind::from_id(&r.get::<_, String>(1)?).unwrap_or(EntityKind::Other),
+        name: r.get(2)?,
+        ident: r.get(3)?,
+        detail: r.get(4)?,
+        year: r.get(5)?,
+        country: r.get(6)?,
+        notes: r.get(7)?,
+        created: r.get(8)?,
+        updated: r.get(9)?,
+    })
+}
 
 fn item_from_row(r: &Row) -> rusqlite::Result<Item> {
     let kind = Kind::from_id(&r.get::<_, String>(1)?).unwrap_or(Kind::Custom);
@@ -143,6 +203,8 @@ fn item_from_row(r: &Row) -> rusqlite::Result<Item> {
         check_note: r.get(24)?,
         created: r.get(25)?,
         updated: r.get(26)?,
+        entity: r.get(27)?,
+        owner_kind: r.get::<_, Option<String>>(28)?.and_then(|k| EntityKind::from_id(&k)),
     })
 }
 
@@ -210,6 +272,9 @@ impl Store {
         for (i, step) in MIGRATIONS.iter().enumerate().skip(version as usize) {
             let tx = self.conn.transaction()?;
             tx.execute_batch(step)?;
+            if i + 1 == 2 {
+                backfill_entities(&tx)?;
+            }
             tx.pragma_update(None, "user_version", (i + 1) as i64)?;
             tx.commit()?;
         }
@@ -232,25 +297,26 @@ impl Store {
     // ── items ────────────────────────────────────────────────────────────────────────────────
 
     pub fn items(&self) -> Result<Vec<Item>> {
-        let mut st = self.conn.prepare(&format!("SELECT {ITEM_COLS} FROM items ORDER BY id"))?;
+        let mut st = self.conn.prepare(&format!("SELECT {ITEM_COLS} FROM {ITEM_FROM} ORDER BY i.id"))?;
         let v = st.query_map([], item_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(v)
     }
 
     pub fn item(&self, id: ItemId) -> Result<Item> {
-        self.conn.query_row(&format!("SELECT {ITEM_COLS} FROM items WHERE id = ?1"), [id], item_from_row).optional()?.ok_or(StoreError::NotFound(id))
+        self.conn.query_row(&format!("SELECT {ITEM_COLS} FROM {ITEM_FROM} WHERE i.id = ?1"), [id], item_from_row).optional()?.ok_or(StoreError::NotFound(id))
     }
 
     /// Inserts `item` (its id is ignored) and returns the new id.
     pub fn insert(&self, item: &Item) -> Result<ItemId> {
         let now = now_secs();
+        let (entity, owner) = self.resolve_owner(item)?;
         self.conn.execute(
-            "INSERT INTO items (kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?25)",
+            "INSERT INTO items (kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated, entity_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?25, ?26)",
             params![
                 item.kind.id(),
                 item.name,
-                item.owner,
+                owner,
                 item.category.id(),
                 d2s(item.issued),
                 d2s(item.expires),
@@ -273,19 +339,21 @@ impl Store {
                 item.last_checked,
                 item.check_note,
                 if item.created > 0 { item.created } else { now },
+                entity,
             ],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
 
     pub fn update(&self, item: &Item) -> Result<()> {
+        let (entity, owner) = self.resolve_owner(item)?;
         let n = self.conn.execute(
-            "UPDATE items SET kind = ?2, name = ?3, owner = ?4, category = ?5, issued = ?6, expires = ?7, recurrence = ?8, term_months = ?9, notice_days = ?10, cost = ?11, currency = ?12, provider = ?13, reference = ?14, notes = ?15, tags = ?16, renewal_url = ?17, auto_renews = ?18, lead_days = ?19, state = ?20, snoozed_until = ?21, host = ?22, auto_check = ?23, last_checked = ?24, check_note = ?25, updated = ?26 WHERE id = ?1",
+            "UPDATE items SET kind = ?2, name = ?3, owner = ?4, category = ?5, issued = ?6, expires = ?7, recurrence = ?8, term_months = ?9, notice_days = ?10, cost = ?11, currency = ?12, provider = ?13, reference = ?14, notes = ?15, tags = ?16, renewal_url = ?17, auto_renews = ?18, lead_days = ?19, state = ?20, snoozed_until = ?21, host = ?22, auto_check = ?23, last_checked = ?24, check_note = ?25, updated = ?26, entity_id = ?27 WHERE id = ?1",
             params![
                 item.id,
                 item.kind.id(),
                 item.name,
-                item.owner,
+                owner,
                 item.category.id(),
                 d2s(item.issued),
                 d2s(item.expires),
@@ -308,6 +376,7 @@ impl Store {
                 item.last_checked,
                 item.check_note,
                 now_secs(),
+                entity,
             ],
         )?;
         if n == 0 {
@@ -352,6 +421,96 @@ impl Store {
             .query_map([id], |r| Ok(Renewal { id: r.get(0)?, item: r.get(1)?, on: s2d(Some(r.get(2)?)).unwrap_or_default(), old_expiry: s2d(r.get(3)?), new_expiry: s2d(r.get(4)?), cost: r.get(5)?, note: r.get(6)? }))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(v)
+    }
+
+    /// The entity an item's `owner` names: its loaded entity while the name still matches, else
+    /// an existing one found by name / identifier, else a new one (`owner_kind`, or guessed).
+    fn resolve_owner(&self, item: &Item) -> Result<(Option<EntityId>, String)> {
+        let name = item.owner.trim();
+        if name.is_empty() {
+            return Ok((None, String::new()));
+        }
+        if let Some(id) = item.entity
+            && let Ok(e) = self.entity(id)
+            && e.name.trim().to_lowercase() == name.to_lowercase()
+        {
+            return Ok((Some(id), e.name));
+        }
+        let all = self.entities()?;
+        if let Some(e) = entity::find(&all, name) {
+            return Ok((Some(e.id), e.name.clone()));
+        }
+        // a stale kind belongs to the entity the item had, not to this new name
+        let kind = item.owner_kind.filter(|_| item.entity.is_none()).unwrap_or_else(|| entity::guess(name, None));
+        let id = self.insert_entity(&Entity::new(kind, name))?;
+        Ok((Some(id), name.to_string()))
+    }
+
+    // ── entities ─────────────────────────────────────────────────────────────────────────────
+
+    pub fn entities(&self) -> Result<Vec<Entity>> {
+        let mut st = self.conn.prepare(&format!("SELECT {ENTITY_COLS} FROM entities ORDER BY name COLLATE NOCASE, id"))?;
+        let v = st.query_map([], entity_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    pub fn entity(&self, id: EntityId) -> Result<Entity> {
+        self.conn.query_row(&format!("SELECT {ENTITY_COLS} FROM entities WHERE id = ?1"), [id], entity_from_row).optional()?.ok_or(StoreError::NotFound(id))
+    }
+
+    pub fn insert_entity(&self, e: &Entity) -> Result<EntityId> {
+        let now = now_secs();
+        self.conn.execute(
+            "INSERT INTO entities (kind, name, ident, detail, year, country, notes, created, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
+            params![e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, if e.created > 0 { e.created } else { now }],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Saves the entity; its items show the new name.
+    pub fn update_entity(&self, e: &Entity) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        let n = tx.execute(
+            "UPDATE entities SET kind = ?2, name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9 WHERE id = ?1",
+            params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs()],
+        )?;
+        if n == 0 {
+            return Err(StoreError::NotFound(e.id));
+        }
+        tx.execute("UPDATE items SET owner = ?2 WHERE entity_id = ?1", params![e.id, e.name.trim()])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Deletes the entity and its relations; its items stay, with no owner.
+    pub fn delete_entity(&self, id: EntityId) -> Result<()> {
+        let tx = self.conn.unchecked_transaction()?;
+        tx.execute("UPDATE items SET owner = '', entity_id = NULL WHERE entity_id = ?1", [id])?;
+        tx.execute("DELETE FROM entities WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    // ── relations ────────────────────────────────────────────────────────────────────────────
+
+    pub fn relations(&self) -> Result<Vec<Relation>> {
+        let mut st = self.conn.prepare("SELECT id, from_id, to_id, role FROM relations ORDER BY id")?;
+        let v = st.query_map([], |r| Ok(Relation { id: r.get(0)?, from: r.get(1)?, to: r.get(2)?, role: Role::from_id(&r.get::<_, String>(3)?) }))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    /// Links `from` → `to` (one link per pair and direction; linking again changes the role).
+    pub fn relate(&self, from: EntityId, to: EntityId, role: Role) -> Result<i64> {
+        if from == to {
+            return Err(StoreError::SelfRelation);
+        }
+        self.conn.execute("INSERT INTO relations (from_id, to_id, role) VALUES (?1, ?2, ?3) ON CONFLICT(from_id, to_id) DO UPDATE SET role = excluded.role", params![from, to, role.id()])?;
+        Ok(self.conn.query_row("SELECT id FROM relations WHERE from_id = ?1 AND to_id = ?2", [from, to], |r| r.get(0))?)
+    }
+
+    pub fn unrelate(&self, id: i64) -> Result<()> {
+        self.conn.execute("DELETE FROM relations WHERE id = ?1", [id])?;
+        Ok(())
     }
 
     // ── reminders ────────────────────────────────────────────────────────────────────────────
@@ -526,7 +685,9 @@ mod tests {
         let mut it = sample();
         it.id = s.insert(&it).unwrap();
         let back = s.item(it.id).unwrap();
-        assert_eq!(Item { created: 0, updated: 0, ..back.clone() }, Item { created: 0, updated: 0, ..it.clone() });
+        let ana = s.entities().unwrap();
+        assert_eq!((ana.len(), ana[0].kind, ana[0].name.as_str()), (1, EntityKind::Person, "Ana"));
+        assert_eq!(Item { created: 0, updated: 0, ..back.clone() }, Item { created: 0, updated: 0, entity: Some(ana[0].id), owner_kind: Some(EntityKind::Person), ..it.clone() });
         let mut changed = back.clone();
         changed.name = "Pasaporte CO".into();
         changed.recurrence = Recurrence::Wyoming { month: 4 };
@@ -570,10 +731,78 @@ mod tests {
         let s = Store::open(&path).unwrap();
         assert_eq!(s.version().unwrap(), latest_version());
         // every table the code uses exists
-        for t in ["meta", "items", "attachments", "renewals", "reminders_sent"] {
+        for t in ["meta", "items", "attachments", "renewals", "reminders_sent", "entities", "relations"] {
             let n: i64 = s.conn.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?1", [t], |r| r.get(0)).unwrap();
             assert_eq!(n, 1, "{t}");
         }
+    }
+
+    /// A version-1 file with free-text owners: each becomes one entity of a guessed kind.
+    #[test]
+    fn owners_become_entities() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v1.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.pragma_update(None, "application_id", APPLICATION_ID).unwrap();
+            c.execute_batch(MIGRATIONS[0]).unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
+            for (kind, name, owner) in [("passport", "Pasaporte", "Ana"), ("soat", "SOAT", "Mazda ABC123"), ("tecnomecanica", "Tecno", "mazda abc123 "), ("wyoming_report", "Annual report", "Otherwise Technologies LLC"), ("camara_comercio", "Cámara", "Otherwise S.A.S."), ("soat", "SOAT moto", "XYZ12A"), ("custom", "Netflix", "")] {
+                c.execute("INSERT INTO items (kind, name, owner, category) VALUES (?1, ?2, ?3, 'other')", [kind, name, owner]).unwrap();
+            }
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.version().unwrap(), latest_version());
+        let es = s.entities().unwrap();
+        let kinds: Vec<(&str, EntityKind, &str)> = es.iter().map(|e| (e.name.as_str(), e.kind, e.ident.as_str())).collect();
+        assert_eq!(kinds, vec![("Ana", EntityKind::Person, ""), ("Mazda ABC123", EntityKind::Vehicle, "ABC123"), ("Otherwise S.A.S.", EntityKind::Company, ""), ("Otherwise Technologies LLC", EntityKind::Company, ""), ("XYZ12A", EntityKind::Vehicle, "XYZ12A")]);
+        let items = s.items().unwrap();
+        let mazda = es.iter().find(|e| e.kind == EntityKind::Vehicle && e.name.starts_with("Mazda")).unwrap().id;
+        assert_eq!(items.iter().filter(|i| i.entity == Some(mazda)).count(), 2);
+        assert!(items.iter().filter(|i| i.entity == Some(mazda)).all(|i| i.owner == "Mazda ABC123" && i.owner_kind == Some(EntityKind::Vehicle)));
+        assert_eq!(items[6].entity, None);
+    }
+
+    #[test]
+    fn entities_resolve_rename_delete_and_relate() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::create(&dir.path().join("e.db")).unwrap();
+        let car = s.insert_entity(&Entity { detail: "Mazda 3".into(), year: Some(2019), ..Entity::new(EntityKind::Vehicle, "Mazda ABC123") }).unwrap();
+        assert_eq!(s.entity(car).unwrap().ident, "ABC123");
+        // a plate, or a word of the name, finds the existing entity
+        let soat = s.insert(&Item { owner: "abc-123".into(), ..Item::new(Kind::Soat, "SOAT") }).unwrap();
+        let tecno = s.insert(&Item { owner: "Mazda".into(), ..Item::new(Kind::Tecnomecanica, "Tecno") }).unwrap();
+        assert_eq!(s.item(soat).unwrap().entity, Some(car));
+        assert_eq!(s.item(tecno).unwrap().owner, "Mazda ABC123");
+        // a new name with an explicit kind
+        let dom = s.insert(&Item { owner: "Otherwise".into(), owner_kind: Some(EntityKind::Company), ..Item::new(Kind::Domain, "otherwisetech.com") }).unwrap();
+        let co = s.item(dom).unwrap();
+        assert_eq!(co.owner_kind, Some(EntityKind::Company));
+        // changing the owner text moves the item; the stale kind is not reused
+        let mut moved = s.item(soat).unwrap();
+        moved.owner = "Ana".into();
+        s.update(&moved).unwrap();
+        let moved = s.item(soat).unwrap();
+        assert_eq!((moved.owner.as_str(), moved.owner_kind), ("Ana", Some(EntityKind::Person)));
+        let mut e = s.entity(car).unwrap();
+        e.name = "Mazda 3 ABC123".into();
+        s.update_entity(&e).unwrap();
+        assert_eq!(s.item(tecno).unwrap().owner, "Mazda 3 ABC123");
+        let ana = moved.entity.unwrap();
+        let company = co.entity.unwrap();
+        let r = s.relate(ana, company, Role::Member).unwrap();
+        assert_eq!(s.relate(ana, company, Role::Owner).unwrap(), r);
+        s.relate(ana, car, Role::Owner).unwrap();
+        assert!(matches!(s.relate(ana, ana, Role::Owner), Err(StoreError::SelfRelation)));
+        let rels = s.relations().unwrap();
+        assert_eq!(rels.iter().map(|r| (r.from, r.to, r.role)).collect::<Vec<_>>(), vec![(ana, company, Role::Owner), (ana, car, Role::Owner)]);
+        s.unrelate(r).unwrap();
+        assert_eq!(s.relations().unwrap().len(), 1);
+        s.delete_entity(car).unwrap();
+        assert!(s.relations().unwrap().is_empty());
+        let t = s.item(tecno).unwrap();
+        assert_eq!((t.owner.as_str(), t.entity), ("", None));
+        assert!(matches!(s.entity(car), Err(StoreError::NotFound(_))));
     }
 
     #[test]

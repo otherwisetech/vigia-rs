@@ -69,6 +69,9 @@ pub fn export(items: &[Item], today: Date, now_secs: i64) -> String {
         line(&format!("DTEND;VALUE=DATE:{}", ics_date(date::add_days(due, 1))));
         line(&format!("SUMMARY:{}", escape(&summary(it))));
         let mut desc = vec![it.kind.label()];
+        if !it.owner.is_empty() {
+            desc.push(i18n::t!("core.ics.belongs_to", kind = it.owner_kind.unwrap_or_default().label(), owner = it.owner));
+        }
         if !it.reference.is_empty() {
             desc.push(it.reference.clone());
         }
@@ -79,7 +82,11 @@ pub fn export(items: &[Item], today: Date, now_secs: i64) -> String {
             desc.push(it.notes.clone());
         }
         line(&format!("DESCRIPTION:{}", escape(&desc.join("\n"))));
-        line(&format!("CATEGORIES:{}", escape(&it.category.label())));
+        let mut cats = vec![escape(&it.category.label())];
+        if let Some(k) = it.owner_kind.filter(|_| !it.owner.is_empty()) {
+            cats.push(escape(&k.label()));
+        }
+        line(&format!("CATEGORIES:{}", cats.join(",")));
         if !it.renewal_url.is_empty() {
             line(&format!("URL:{}", it.renewal_url));
         }
@@ -170,6 +177,7 @@ mod tests {
         let mut a = Item::new(Kind::Passport, "Pasaporte");
         a.id = 7;
         a.owner = "Ana".into();
+        a.owner_kind = Some(crate::model::Kind::Passport.entity_kind().unwrap());
         a.expires = ymd(2031, 5, 12);
         a.notes = "Consulado; cita, con \\ y\nsegunda línea muy larga que obliga a doblar la línea del archivo iCalendar en varias partes".into();
         let mut b = Item::new(Kind::Contract, "Arriendo");
@@ -190,6 +198,8 @@ mod tests {
         assert_eq!(ev[0].start, ymd(2031, 5, 12));
         assert_eq!(ev[0].alarms, vec![270, 180, 90, 30]);
         assert!(ev[0].description.ends_with(&a.notes));
+        assert!(ev[0].description.contains(&i18n::t!("core.ics.belongs_to", kind = crate::entity::EntityKind::Person.label(), owner = "Ana")));
+        assert!(text.contains(&format!("CATEGORIES:{},{}", a.category.label(), crate::entity::EntityKind::Person.label())));
         assert!(ev[0].summary.contains("Pasaporte") && ev[0].summary.contains("Ana"));
         // contracts: the event is on the notice deadline
         assert_eq!(ev[1].start, ymd(2026, 12, 2));

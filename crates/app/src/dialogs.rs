@@ -29,6 +29,7 @@ pub struct SettingsForm {
 pub enum Dialog {
     Renew { id: ItemId, expires: Entity<InputState>, cost: Entity<InputState>, note: Entity<InputState>, _sub: Subscription },
     Delete { id: ItemId, name: String },
+    DeleteEntity { id: vigia_core::entity::EntityId, name: String, items: usize },
     Settings(SettingsForm),
     /// The models must be downloaded before reading an image.
     OcrModels { path: PathBuf, target: Option<ItemId> },
@@ -149,6 +150,7 @@ impl VigiaApp {
                 it.reference = ex.number.clone().unwrap_or_default();
                 if let Some(h) = &ex.holder {
                     it.owner = h.clone();
+                    it.owner_kind = Some(vigia_core::entity::EntityKind::Person);
                 }
                 match self.data.update(cx, |d, cx| d.save(it, cx)) {
                     Ok(id) => {
@@ -193,6 +195,14 @@ impl VigiaApp {
                     this.data.update(cx, |d, cx| d.delete(id, cx));
                     this.selected = None;
                     this.edit = None;
+                }
+                cx.notify();
+            }),
+            Dialog::DeleteEntity { name, items, .. } => (i18n::t!("app.entity.delete_title"), text(i18n::tn!("app.entity.delete_body", *items, name = name.clone())).into_any_element(), i18n::t!("app.entity.delete"), true, |this, _, cx| {
+                if let Some(Dialog::DeleteEntity { id, .. }) = this.dialog.take() {
+                    this.data.update(cx, |d, cx| d.delete_entity(id, cx));
+                    this.entity_edit = None;
+                    this.view = crate::app::View::Dashboard;
                 }
                 cx.notify();
             }),

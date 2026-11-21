@@ -451,8 +451,13 @@ pub struct Item {
     pub id: ItemId,
     pub kind: Kind,
     pub name: String,
-    /// Whose it is (a person, a company, a car).
+    /// Whose it is: the name of its entity (a person, a vehicle, a company…). Saving resolves
+    /// it to an existing entity or creates one.
     pub owner: String,
+    /// The entity `owner` names, as loaded.
+    pub entity: Option<crate::entity::EntityId>,
+    /// The entity's kind as loaded; on save, the kind for a new entity when `entity` is `None`.
+    pub owner_kind: Option<crate::entity::EntityKind>,
     pub category: Category,
     pub issued: Option<Date>,
     /// The expiry / due date currently in force.

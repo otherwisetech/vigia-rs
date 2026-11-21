@@ -4,6 +4,8 @@
 
 mod app;
 mod dialogs;
+mod entities;
+mod graph;
 #[cfg(target_os = "macos")]
 mod macos;
 mod panel;
@@ -72,6 +74,7 @@ pub(crate) fn set_app_menus(cx: &mut App) {
             MenuItem::action(i18n::t!("app.view.timeline"), ShowTimeline),
             MenuItem::action(i18n::t!("app.view.calendar"), ShowCalendar),
             MenuItem::action(i18n::t!("app.view.list"), ShowList),
+            MenuItem::action(i18n::t!("app.view.graph"), ShowGraph),
             MenuItem::separator(),
             MenuItem::action(i18n::t!("app.search.menu"), FocusSearch),
         ],
@@ -98,8 +101,16 @@ struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> Result<Option<Cow<'static, [u8]>>> {
-        if path == LOGO_SVG {
-            return Ok(Some(Cow::Borrowed(include_bytes!("../assets/icons/vigia-logo.svg"))));
+        let own: Option<&'static [u8]> = match path {
+            LOGO_SVG => Some(include_bytes!("../assets/icons/vigia-logo.svg")),
+            ui::CAR_SVG => Some(include_bytes!("../assets/icons/vigia-car.svg")),
+            ui::HOUSE_SVG => Some(include_bytes!("../assets/icons/vigia-house.svg")),
+            ui::PAW_SVG => Some(include_bytes!("../assets/icons/vigia-paw.svg")),
+            ui::GRAPH_SVG => Some(include_bytes!("../assets/icons/vigia-graph.svg")),
+            _ => None,
+        };
+        if let Some(b) = own {
+            return Ok(Some(Cow::Borrowed(b)));
         }
         Assets.load(path)
     }
@@ -326,8 +337,8 @@ fn main() {
     if opts.demo && temporary && data.items.is_empty()
         && let Some(s) = &data.store
     {
-        for it in vigia_core::demo::items(state::Data::today()) {
-            let _ = s.insert(&it);
+        if let Err(e) = vigia_core::demo::seed(s, state::Data::today()) {
+            eprintln!("demo: {e}");
         }
         data.reload();
     }

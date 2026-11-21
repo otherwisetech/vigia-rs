@@ -40,6 +40,7 @@ actions!(
         ShowTimeline,
         ShowCalendar,
         ShowList,
+        ShowGraph,
         FocusSearch,
         Escape,
         RenewSelected,
@@ -62,6 +63,7 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("secondary-2", ShowTimeline, Some(CONTEXT)),
         KeyBinding::new("secondary-3", ShowCalendar, Some(CONTEXT)),
         KeyBinding::new("secondary-4", ShowList, Some(CONTEXT)),
+        KeyBinding::new("secondary-5", ShowGraph, Some(CONTEXT)),
         KeyBinding::new("secondary-r", RenewSelected, Some(CONTEXT)),
         KeyBinding::new("secondary-e", EditSelected, Some(CONTEXT)),
         KeyBinding::new("secondary-,", OpenSettings, Some(CONTEXT)),
@@ -107,6 +109,9 @@ pub enum View {
     Timeline,
     Calendar,
     List,
+    Graph,
+    /// One person / vehicle / company: its items, deadlines, files and links.
+    Entity(vigia_core::entity::EntityId),
 }
 
 impl View {
@@ -115,7 +120,8 @@ impl View {
             View::Dashboard => "dashboard",
             View::Timeline => "timeline",
             View::Calendar => "calendar",
-            View::List => "list",
+            View::List | View::Entity(_) => "list",
+            View::Graph => "graph",
         }
     }
 
@@ -124,6 +130,7 @@ impl View {
             "timeline" => View::Timeline,
             "calendar" => View::Calendar,
             "list" => View::List,
+            "graph" => View::Graph,
             _ => View::Dashboard,
         }
     }
@@ -137,6 +144,8 @@ pub struct VigiaApp {
     pub quick: Entity<InputState>,
     pub selected: Option<ItemId>,
     pub edit: Option<crate::panel::EditForm>,
+    pub entity_edit: Option<crate::entities::EntityForm>,
+    pub graph: crate::graph::GraphState,
     pub dialog: Option<Dialog>,
     pub about: bool,
     toast: Option<(String, Instant)>,
@@ -160,6 +169,12 @@ impl VigiaApp {
                 if this.selected.is_some_and(|id| this.data.read(cx).item(id).is_none()) {
                     this.selected = None;
                     this.edit = None;
+                }
+                if let View::Entity(id) = this.view
+                    && this.data.read(cx).entity(id).is_none()
+                {
+                    this.view = View::Dashboard;
+                    this.entity_edit = None;
                 }
                 cx.notify();
             }),
@@ -191,6 +206,8 @@ impl VigiaApp {
             quick,
             selected: None,
             edit: None,
+            entity_edit: None,
+            graph: crate::graph::GraphState::default(),
             dialog: None,
             about: false,
             toast: None,
@@ -224,7 +241,17 @@ impl VigiaApp {
 
     pub fn set_view(&mut self, v: View, cx: &mut Context<Self>) {
         self.view = v;
-        Settings::update(|s| s.view = Some(v.id().into()));
+        if !matches!(v, View::Entity(_)) {
+            Settings::update(|s| s.view = Some(v.id().into()));
+        }
+        cx.notify();
+    }
+
+    pub fn open_entity(&mut self, id: vigia_core::entity::EntityId, cx: &mut Context<Self>) {
+        if self.entity_edit.as_ref().is_some_and(|f| f.id != id) {
+            self.entity_edit = None;
+        }
+        self.view = View::Entity(id);
         cx.notify();
     }
 
@@ -263,6 +290,8 @@ impl VigiaApp {
             self.about = false;
         } else if self.dialog.is_some() {
             self.dialog = None;
+        } else if self.entity_edit.is_some() {
+            self.entity_edit = None;
         } else if self.edit.is_some() {
             self.edit = None;
         } else if !self.search.read(cx).value().is_empty() {
@@ -340,7 +369,15 @@ impl VigiaApp {
         }
         let it = vigia_core::quick::parse(&text, Data::today(), Self::order());
         let when = it.end_date(Data::today()).map(crate::views::long_date).unwrap_or_else(|| i18n::t!("app.quick.no_date"));
-        Some(i18n::t!("app.quick.preview", kind = it.kind.label(), name = it.title(), date = when))
+        let mut out = i18n::t!("app.quick.preview", kind = it.kind.label(), name = it.name, date = when);
+        if !it.owner.is_empty() {
+            let d = self.data.read(cx);
+            out = match vigia_core::entity::find(&d.entities, &it.owner) {
+                Some(e) => i18n::t!("app.quick.preview_owner", rest = out, kind = e.kind.label(), owner = e.name),
+                None => i18n::t!("app.quick.preview_new_owner", rest = out, kind = it.owner_kind.unwrap_or_default().label(), owner = it.owner),
+            };
+        }
+        Some(out)
     }
 
     pub fn new_item(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -613,7 +650,7 @@ impl VigiaApp {
         let today = Data::today();
         let d = self.data.read(cx);
         let counts = vigia_core::view::counts(&d.items, today);
-        let owners = vigia_core::view::owners(&d.items);
+        let sections = vigia_core::view::sections(&d.entities, &d.items);
         let mut cats: Vec<(Category, usize)> = Category::ALL.iter().map(|c| (*c, d.items.iter().filter(|i| i.category == *c && i.state != vigia_core::model::State::Archived).count())).filter(|(_, n)| *n > 0).collect();
         cats.sort_by_key(|(c, _)| *c);
         let hover = t.canvas;
@@ -676,14 +713,63 @@ impl VigiaApp {
             .child(nav("nav-dash", IconName::LayoutDashboard, i18n::t!("app.view.dashboard"), View::Dashboard, Some((counts.attention(), t.warn)), v == View::Dashboard))
             .child(nav("nav-time", IconName::Map, i18n::t!("app.view.timeline"), View::Timeline, None, v == View::Timeline))
             .child(nav("nav-cal", IconName::Calendar, i18n::t!("app.view.calendar"), View::Calendar, None, v == View::Calendar))
-            .child(nav("nav-list", IconName::Inbox, i18n::t!("app.view.list"), View::List, Some((counts.total, t.ink_muted)), v == View::List && self.filter.owner.is_none() && self.filter.category.is_none() && self.filter.status.is_none()));
-        if !owners.is_empty() {
-            side = side.child(div().pt(px(14.)).pb(px(4.)).px(px(10.)).child(ui::section_title(t, i18n::t!("app.side.people"))));
-            for (k, o) in owners.into_iter().enumerate() {
-                let n = d.items.iter().filter(|i| i.owner.eq_ignore_ascii_case(&o) && i.state != vigia_core::model::State::Archived).count();
-                let on = v == View::List && self.filter.owner.as_deref().is_some_and(|x| x.eq_ignore_ascii_case(&o));
-                let o2 = o.clone();
-                side = side.child(filter_row(("owner", k).into(), o, n, on, Box::new(move |f| *f = Filter { owner: Some(o2.clone()), ..Default::default() })));
+            .child(nav("nav-list", IconName::Inbox, i18n::t!("app.view.list"), View::List, Some((counts.total, t.ink_muted)), v == View::List && self.filter.entity.is_none() && self.filter.entity_kind.is_none() && self.filter.category.is_none() && self.filter.status.is_none()))
+            .child({
+                let on = v == View::Graph;
+                div()
+                    .id("nav-graph")
+                    .flex()
+                    .items_center()
+                    .gap(px(9.))
+                    .h(px(32.))
+                    .px(px(10.))
+                    .rounded(px(8.))
+                    .text_size(px(13.))
+                    .cursor_pointer()
+                    .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
+                    .when(!on, |d| d.hover(move |s| s.bg(hover)))
+                    .child(ui::svg_icon(ui::GRAPH_SVG, 15., if on { t.accent } else { t.ink_muted }))
+                    .child(div().flex_1().child(i18n::t!("app.view.graph")))
+                    .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Graph, cx)))
+            });
+        for (kind, ents) in sections {
+            let kind_on = v == View::List && self.filter.entity_kind == Some(kind) && self.filter.entity.is_none();
+            side = side.child(
+                div()
+                    .id(("side-kind", kind as usize))
+                    .pt(px(14.))
+                    .pb(px(4.))
+                    .px(px(10.))
+                    .cursor_pointer()
+                    .child(ui::section_title(t, crate::entities::section_label(kind)).when(kind_on, |d| d.text_color(t.accent)))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.filter = Filter { entity_kind: Some(kind), ..Default::default() };
+                        this.set_view(View::List, cx);
+                    })),
+            );
+            for (e, n) in ents {
+                let id = e.id;
+                let on = v == View::Entity(id);
+                let ring = vigia_core::view::worst_status(&d.items, id, today).map(|s| t.status(s));
+                side = side.child(
+                    div()
+                        .id(("ent", id as usize))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .h(px(28.))
+                        .px(px(10.))
+                        .rounded(px(7.))
+                        .text_size(px(12.5))
+                        .cursor_pointer()
+                        .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
+                        .when(!on, |d| d.hover(move |s| s.bg(hover)))
+                        .child(ui::entity_icon(kind, 13., if on { t.accent } else { t.ink_muted }))
+                        .child(div().flex_1().min_w_0().truncate().child(e.name.clone()))
+                        .children(ring.map(|c| div().size(px(6.)).rounded_full().bg(c)))
+                        .child(div().text_size(px(11.)).text_color(t.ink_muted).child(n.to_string()))
+                        .on_click(cx.listener(move |this, _, _, cx| this.open_entity(id, cx))),
+                );
             }
         }
         if !cats.is_empty() {
@@ -846,6 +932,8 @@ impl Render for VigiaApp {
                     View::Timeline => self.render_timeline(&t, cx).into_any_element(),
                     View::Calendar => self.render_calendar(&t, cx).into_any_element(),
                     View::List => self.render_list(&t, cx).into_any_element(),
+                    View::Graph => self.render_graph(window, cx),
+                    View::Entity(id) => self.render_entity_page(&t, id, cx),
                 };
                 let accent = t.accent;
                 let center = div()
@@ -880,6 +968,7 @@ impl Render for VigiaApp {
             .on_action(cx.listener(|this, _: &ShowTimeline, _, cx| this.set_view(View::Timeline, cx)))
             .on_action(cx.listener(|this, _: &ShowCalendar, _, cx| this.set_view(View::Calendar, cx)))
             .on_action(cx.listener(|this, _: &ShowList, _, cx| this.set_view(View::List, cx)))
+            .on_action(cx.listener(|this, _: &ShowGraph, _, cx| this.set_view(View::Graph, cx)))
             .on_action(cx.listener(|this, _: &FocusSearch, window, cx| this.focus_search(window, cx)))
             .on_action(cx.listener(|this, _: &Escape, window, cx| this.escape(window, cx)))
             .on_action(cx.listener(|this, _: &RenewSelected, window, cx| this.with_selected(window, cx, |this, it, window, cx| this.open_renew(it.id, window, cx))))

@@ -1,13 +1,15 @@
 //! What the views show, computed without UI: filters, dashboard counts, the timeline's months
 //! and the calendar's grid.
 use crate::date::{self, Date};
+use crate::entity::{Entity, EntityId, EntityKind};
 use crate::model::{Category, Item, State, Status};
 use chrono::Datelike;
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Filter {
     pub query: String,
-    pub owner: Option<String>,
+    pub entity: Option<EntityId>,
+    pub entity_kind: Option<EntityKind>,
     pub category: Option<Category>,
     pub status: Option<Status>,
     pub show_archived: bool,
@@ -18,7 +20,10 @@ impl Filter {
         if it.state == State::Archived && !self.show_archived {
             return false;
         }
-        if self.owner.as_ref().is_some_and(|o| !it.owner.eq_ignore_ascii_case(o)) {
+        if self.entity.is_some() && it.entity != self.entity {
+            return false;
+        }
+        if self.entity_kind.is_some() && it.owner_kind != self.entity_kind {
             return false;
         }
         if self.category.is_some_and(|c| it.category != c) {
@@ -88,17 +93,22 @@ pub fn next(items: &[Item], today: Date, n: usize) -> Vec<&Item> {
     sorted(items.iter().filter(|i| i.state != State::Archived && i.due_date(today).is_some()), today).into_iter().take(n).collect()
 }
 
-/// Owners in use, sorted, case-insensitively unique.
-pub fn owners(items: &[Item]) -> Vec<String> {
-    let mut v: Vec<String> = Vec::new();
-    for it in items {
-        let o = it.owner.trim();
-        if !o.is_empty() && !v.iter().any(|x| x.eq_ignore_ascii_case(o)) {
-            v.push(o.to_string());
-        }
-    }
-    v.sort_by_key(|s| s.to_lowercase());
-    v
+/// The sidebar's groups: each entity kind in use, with its entities (by name) and how many
+/// items (not archived) each has.
+pub fn sections<'a>(entities: &'a [Entity], items: &[Item]) -> Vec<(EntityKind, Vec<(&'a Entity, usize)>)> {
+    EntityKind::ALL
+        .into_iter()
+        .filter_map(|k| {
+            let mut v: Vec<(&Entity, usize)> = entities.iter().filter(|e| e.kind == k).map(|e| (e, items.iter().filter(|i| i.entity == Some(e.id) && i.state != State::Archived).count())).collect();
+            v.sort_by_key(|(e, _)| e.name.to_lowercase());
+            (!v.is_empty()).then_some((k, v))
+        })
+        .collect()
+}
+
+/// The worst status among an entity's items (not archived), for its colour.
+pub fn worst_status(items: &[Item], entity: EntityId, today: Date) -> Option<Status> {
+    items.iter().filter(|i| i.entity == Some(entity) && i.state != State::Archived).map(|i| i.status(today)).filter(|s| *s != Status::Undated).min()
 }
 
 /// One month on the timeline.
@@ -159,14 +169,18 @@ mod tests {
             it(4, "Later", ymd(2027, 9, 1)),
             it(5, "Undated", None),
             Item { state: State::Archived, ..it(6, "Old", ymd(2026, 12, 1)) },
-            Item { owner: "Ana".into(), state: State::InProgress, kind: Kind::Passport, category: Category::Identity, ..it(7, "Pasaporte", ymd(2026, 11, 20)) },
+            Item { owner: "Ana".into(), entity: Some(1), owner_kind: Some(EntityKind::Person), state: State::InProgress, kind: Kind::Passport, category: Category::Identity, ..it(7, "Pasaporte", ymd(2026, 11, 20)) },
         ];
         let c = counts(&items, today);
         assert_eq!(c, Counts { expired: 1, soon: 2, upcoming: 1, ok: 1, undated: 1, in_progress: 1, total: 6 });
         assert_eq!(c.attention(), 3);
         assert_eq!(next(&items, today, 3).iter().map(|i| i.id).collect::<Vec<_>>(), vec![1, 7, 2]);
-        let f = Filter { owner: Some("ana".into()), ..Default::default() };
+        let f = Filter { entity: Some(1), ..Default::default() };
         assert_eq!(filtered(&items, &f, today).len(), 1);
+        let f = Filter { entity_kind: Some(EntityKind::Person), ..Default::default() };
+        assert_eq!(filtered(&items, &f, today)[0].id, 7);
+        let f = Filter { entity_kind: Some(EntityKind::Vehicle), ..Default::default() };
+        assert!(filtered(&items, &f, today).is_empty());
         let f = Filter { status: Some(Status::Soon), ..Default::default() };
         assert_eq!(filtered(&items, &f, today).iter().map(|i| i.id).collect::<Vec<_>>(), vec![7, 2]);
         let f = Filter { query: "pasa ana".into(), ..Default::default() };
@@ -174,7 +188,11 @@ mod tests {
         let f = Filter { category: Some(Category::Identity), ..Default::default() };
         assert_eq!(filtered(&items, &f, today)[0].id, 7);
         assert_eq!(filtered(&items, &Filter { show_archived: true, ..Default::default() }, today).len(), 7);
-        assert_eq!(owners(&items), vec!["Ana".to_string()]);
+        let ents = vec![Entity { id: 1, name: "Ana".into(), ..Default::default() }, Entity { id: 2, kind: EntityKind::Vehicle, name: "Mazda ABC123".into(), ..Default::default() }, Entity { id: 3, name: "Luis".into(), ..Default::default() }];
+        let sec = sections(&ents, &items);
+        assert_eq!(sec.iter().map(|(k, v)| (*k, v.iter().map(|(e, n)| (e.id, *n)).collect::<Vec<_>>())).collect::<Vec<_>>(), vec![(EntityKind::Person, vec![(1, 1), (3, 0)]), (EntityKind::Vehicle, vec![(2, 0)])]);
+        assert_eq!(worst_status(&items, 1, today), Some(Status::Soon));
+        assert_eq!(worst_status(&items, 2, today), None);
         items.retain(|i| i.state != State::Archived);
         let refs: Vec<&Item> = items.iter().collect();
         let (overdue, months) = timeline(&refs, today, 12);

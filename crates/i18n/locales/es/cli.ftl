@@ -1,5 +1,5 @@
 # La línea de comandos `vigia`.
-cli.usage = Uso: vigia [--db RUTA] [--json] <comando>\n\n  list [texto] [--status expired|soon|upcoming|ok|undated] [--owner NOMBRE] [--category ID] [--all]\n  due [--days 30]              lo que vence en los próximos N días (y lo vencido)\n  show <id>                    detalle, historial de renovaciones y adjuntos\n  add "Pasaporte @Ana 12/05/2031"   o  add --kind passport --name … --expires …\n  edit <id> [--name … --expires … --owner … --host … --lead "90,30,7" …]\n  renew <id> [--expires FECHA] [--cost N] [--note TEXTO]\n  delete <id>\n  check <id> | --all           revisa dominios (RDAP) y certificados (TLS) por la red\n  export csv|ics [ARCHIVO]     import ARCHIVO.csv     backup ARCHIVO.zip\n  kinds                        tipos y sus recordatorios por defecto\n  path                         la base de datos en uso\n\nFechas: 2031-05-12, 12/05/2031, 12 may 2031, «en 3 meses». La base de datos es la misma de la app (o VIGIA_DB, o --db).
+cli.usage = Uso: vigia [--db RUTA] [--json] <comando>\n\n  list [texto] [--status expired|soon|upcoming|ok|undated] [--owner NOMBRE] [--owner-kind vehicle] [--category ID] [--all]\n  due [--days 30]              lo que vence en los próximos N días (y lo vencido)\n  show <id>                    detalle, historial de renovaciones y adjuntos\n  add "Pasaporte @Ana 12/05/2031"   o  add --kind passport --name … --expires …\n  edit <id> [--name … --expires … --owner … --host … --lead "90,30,7" …]\n  renew <id> [--expires FECHA] [--cost N] [--note TEXTO]\n  delete <id>\n  check <id> | --all           revisa dominios (RDAP) y certificados (TLS) por la red\n  export csv|ics [ARCHIVO]     import ARCHIVO.csv     backup ARCHIVO.zip\n  entities [--kind vehicle]    personas, vehículos, empresas, inmuebles, mascotas, digital\n  entity <id|nombre> [--name … --kind … --ident PLACA/NIT --detail … --year … --country …] [--delete]\n  relate <de> <a> [--role owner|member|manager|family|uses|other] [--remove]\n  kinds                        tipos y sus recordatorios por defecto\n  path                         la base de datos en uso\n\nFechas: 2031-05-12, 12/05/2031, 12 may 2031, «en 3 meses». La base de datos es la misma de la app (o VIGIA_DB, o --db).
 cli.days_left.one = falta 1 día
 cli.days_left.other = faltan {n} días
 cli.days_ago.one = venció hace 1 día
@@ -32,3 +32,11 @@ cli.err.export_usage = Uso: vigia export csv|ics [ARCHIVO]
 cli.err.import_usage = Uso: vigia import ARCHIVO.csv
 cli.err.backup_usage = Uso: vigia backup ARCHIVO.zip
 cli.err.unknown = Comando desconocido «{cmd}». Prueba `vigia help`.
+cli.err.bad_entity_kind = Tipo de dueño desconocido «{value}» (person, vehicle, company, property, pet, digital, other).
+cli.err.needs_entity = ¿Cuál? Indica un id o un nombre.
+cli.err.no_entity = No hay nada llamado «{value}».
+cli.entities.empty = Aún no hay personas, vehículos ni empresas.
+cli.relate.done = {from} → {to} ({role})
+cli.relate.removed = {from} y {to} ya no están relacionados.
+cli.entity.items.one = 1 elemento
+cli.entity.items.other = {n} elementos

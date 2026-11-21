@@ -4,6 +4,7 @@ use serde_json::{Value, json};
 use std::path::PathBuf;
 use vigia_core::date::{self, Date};
 use vigia_core::db::Store;
+use vigia_core::entity::{Entity, EntityKind, Role};
 use vigia_core::model::{Category, Item, Kind, Status};
 use vigia_core::view::{self, Filter};
 
@@ -18,7 +19,7 @@ struct Args {
 }
 
 /// Options that take a value; everything else starting with `--` is a flag.
-const WITH_VALUE: &[&str] = &["db", "days", "status", "owner", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
+const WITH_VALUE: &[&str] = &["db", "days", "status", "owner", "owner-kind", "ident", "detail", "year", "country", "role", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args::default();
@@ -71,6 +72,8 @@ fn item_json(it: &Item, today: Date) -> Value {
         "kind": it.kind.id(),
         "name": it.name,
         "owner": it.owner,
+        "owner_kind": it.owner_kind.filter(|_| !it.owner.is_empty()).map(|k| k.id()),
+        "entity_id": it.entity,
         "category": it.category.id(),
         "issued": d(it.issued),
         "expires": d(it.end_date(today)),
@@ -96,6 +99,41 @@ fn item_json(it: &Item, today: Date) -> Value {
         "check_note": it.check_note,
         "notes": it.notes,
     })
+}
+
+fn entity_json(e: &Entity, items: &[Item]) -> Value {
+    json!({
+        "id": e.id,
+        "kind": e.kind.id(),
+        "name": e.name,
+        "ident": e.ident,
+        "detail": e.detail,
+        "year": e.year,
+        "country": e.country,
+        "notes": e.notes,
+        "items": items.iter().filter(|i| i.entity == Some(e.id)).count(),
+    })
+}
+
+fn entity_line(e: &Entity, items: &[Item]) -> String {
+    let n = items.iter().filter(|i| i.entity == Some(e.id)).count();
+    format!("{:>4}  {:<10}  {}  {}  ({})", e.id, e.kind.id(), e.name, e.ident, i18n::tn!("cli.entity.items", n)) // i18n-ok: table row
+}
+
+fn entity_kind_opt(a: &Args, k: &str) -> Result<Option<EntityKind>, String> {
+    a.opt(k).map(|v| EntityKind::from_id(v).ok_or_else(|| i18n::t!("cli.err.bad_entity_kind", value = v))).transpose()
+}
+
+/// An entity by id, else by name / identifier.
+fn entity_arg(s: &Store, v: Option<&String>) -> Result<Entity, String> {
+    let v = v.ok_or_else(|| i18n::t!("cli.err.needs_entity"))?;
+    if let Ok(id) = v.parse::<i64>()
+        && let Ok(e) = s.entity(id)
+    {
+        return Ok(e);
+    }
+    let all = s.entities().map_err(|e| e.to_string())?;
+    vigia_core::entity::find(&all, v).cloned().ok_or_else(|| i18n::t!("cli.err.no_entity", value = v))
 }
 
 fn line(it: &Item, today: Date) -> String {
@@ -128,7 +166,15 @@ fn apply_opts(it: &mut Item, a: &Args, today: Date) -> Result<(), String> {
         it.name = v.to_string();
     }
     if let Some(v) = a.opt("owner") {
+        if v.trim() != it.owner.trim() {
+            it.entity = None;
+            it.owner_kind = None;
+        }
         it.owner = v.to_string();
+    }
+    if let Some(k) = entity_kind_opt(a, "owner-kind")? {
+        it.entity = None;
+        it.owner_kind = Some(k);
     }
     if let Some(v) = a.opt("expires") {
         it.expires = Some(parse_date(v, today)?);
@@ -198,7 +244,9 @@ fn run(a: &Args) -> Result<(), String> {
             let items = s.items().map_err(|e| e.to_string())?;
             let f = Filter {
                 query: a.pos.join(" "),
-                owner: a.opt("owner").map(String::from),
+                // an owner that matches nothing shows nothing
+                entity: a.opt("owner").map(|o| entity_arg(&s, Some(&o.to_string())).map(|e| e.id).unwrap_or(-1)),
+                entity_kind: entity_kind_opt(a, "owner-kind")?,
                 category: a.opt("category").map(|c| Category::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_category", value = c))).transpose()?,
                 status: a.opt("status").map(|c| Status::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_status", value = c))).transpose()?,
                 show_archived: a.flag("all"),
@@ -328,6 +376,70 @@ fn run(a: &Args) -> Result<(), String> {
             let n = vigia_core::backup::create(&s, std::path::Path::new(f)).map_err(|e| e.to_string())?;
             out(a, json!({"written": f, "attachments": n}), || i18n::tn!("cli.backup.done", n, file = f));
         }
+        "entities" => {
+            let s = open(a)?;
+            let items = s.items().map_err(|e| e.to_string())?;
+            let kind = entity_kind_opt(a, "kind")?;
+            let v: Vec<Entity> = s.entities().map_err(|e| e.to_string())?.into_iter().filter(|e| kind.is_none_or(|k| e.kind == k)).collect();
+            out(a, Value::Array(v.iter().map(|e| entity_json(e, &items)).collect()), || if v.is_empty() { i18n::t!("cli.entities.empty") } else { v.iter().map(|e| entity_line(e, &items)).collect::<Vec<_>>().join("\n") });
+        }
+        "entity" => {
+            let s = open(a)?;
+            let mut e = entity_arg(&s, a.pos.first())?;
+            let before = e.clone();
+            if let Some(k) = entity_kind_opt(a, "kind")? {
+                e.kind = k;
+            }
+            for (k, field) in [("name", &mut e.name), ("ident", &mut e.ident), ("detail", &mut e.detail), ("country", &mut e.country), ("notes", &mut e.notes)] {
+                if let Some(v) = a.opt(k) {
+                    *field = v.to_string();
+                }
+            }
+            if let Some(v) = a.opt("year") {
+                e.year = if v.is_empty() { None } else { Some(v.parse().map_err(|_| i18n::t!("cli.err.bad_number", value = v))?) };
+            }
+            if a.flag("delete") {
+                s.delete_entity(e.id).map_err(|x| x.to_string())?;
+                out(a, json!({"deleted_entity": e.id}), || i18n::t!("cli.delete.done", name = e.name));
+                return Ok(());
+            }
+            if e != before {
+                s.update_entity(&e).map_err(|x| x.to_string())?;
+            }
+            let items = s.items().map_err(|x| x.to_string())?;
+            let rels = s.relations().map_err(|x| x.to_string())?;
+            let all = s.entities().map_err(|x| x.to_string())?;
+            let name = |id: i64| all.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
+            let mine: Vec<&Item> = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today);
+            let links: Vec<_> = rels.iter().filter(|r| r.from == e.id || r.to == e.id).collect();
+            let mut v = entity_json(&e, &items);
+            v["item_list"] = mine.iter().map(|i| item_json(i, today)).collect();
+            v["relations"] = links.iter().map(|r| json!({"id": r.id, "from": r.from, "from_name": name(r.from), "to": r.to, "to_name": name(r.to), "role": r.role.id()})).collect();
+            out(a, v, || {
+                let mut t = vec![entity_line(&e, &items)];
+                for r in &links {
+                    t.push(format!("      {} → {} ({})", name(r.from), name(r.to), r.role.label())); // i18n-ok: layout
+                }
+                t.extend(mine.iter().map(|i| line(i, today)));
+                t.join("\n")
+            });
+        }
+        "relate" => {
+            let s = open(a)?;
+            let from = entity_arg(&s, a.pos.first())?;
+            let to = entity_arg(&s, a.pos.get(1))?;
+            if a.flag("remove") {
+                let rels = s.relations().map_err(|e| e.to_string())?;
+                for r in rels.iter().filter(|r| r.from == from.id && r.to == to.id) {
+                    s.unrelate(r.id).map_err(|e| e.to_string())?;
+                }
+                out(a, json!({"removed": true}), || i18n::t!("cli.relate.removed", from = from.name, to = to.name));
+            } else {
+                let role = a.opt("role").map(Role::from_id).unwrap_or_default();
+                let id = s.relate(from.id, to.id, role).map_err(|e| e.to_string())?;
+                out(a, json!({"id": id, "from": from.id, "to": to.id, "role": role.id()}), || i18n::t!("cli.relate.done", from = from.name, to = to.name, role = role.label()));
+            }
+        }
         "kinds" => {
             out(a, Value::Array(Kind::ALL.iter().map(|k| json!({"id": k.id(), "label": k.label(), "category": k.category().id(), "lead_days": k.lead_days(), "recurrence": k.recurrence().id()})).collect()), || Kind::ALL.iter().map(|k| format!("{:<22} {}", k.id(), k.label())).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
         }
@@ -392,7 +504,7 @@ mod tests {
         let d = db.to_str().unwrap();
         let today = date::today();
         let soon = date::iso(date::add_days(today, 10));
-        run(&args(&["--db", d, "add", "SOAT", "moto", &soon, "--owner", "Ana", "--cost", "350000"])).unwrap();
+        run(&args(&["--db", d, "add", "SOAT", "moto", &soon, "--owner", "Ana", "--owner-kind", "person", "--cost", "350000"])).unwrap();
         run(&args(&["--db", d, "add", "--kind", "domain", "example.com", "--host", "example.com", "--expires", "2099-01-01"])).unwrap();
         let s = Store::open(&db).unwrap();
         let items = s.items().unwrap();
@@ -400,6 +512,8 @@ mod tests {
         assert_eq!((items[0].kind, items[0].owner.as_str(), items[0].cost), (Kind::Soat, "Ana", Some(350000.0)));
         assert_eq!(item_json(&items[0], today)["days_left"], json!(10));
         assert_eq!(item_json(&items[0], today)["status"], json!("soon"));
+        assert_eq!(item_json(&items[0], today)["owner_kind"], json!("person"));
+        assert_eq!(item_json(&items[1], today)["owner_kind"], Value::Null);
         drop(s);
         run(&args(&["--db", d, "renew", &items[0].id.to_string()])).unwrap();
         let s = Store::open(&db).unwrap();
@@ -411,5 +525,38 @@ mod tests {
         run(&args(&["--db", d, "export", "csv", dir.path().join("x.csv").to_str().unwrap()])).unwrap();
         run(&args(&["--db", d, "import", dir.path().join("x.csv").to_str().unwrap()])).unwrap();
         assert_eq!(Store::open(&db).unwrap().items().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn entities_and_relations() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = dir.path().join("e.db");
+        let d = db.to_str().unwrap();
+        run(&args(&["--db", d, "add", "Tecno", "#ABC123", "2099-01-01"])).unwrap();
+        run(&args(&["--db", d, "add", "RUT", "@Otherwise_SAS"])).unwrap();
+        run(&args(&["--db", d, "add", "Pasaporte", "@Juan"])).unwrap();
+        run(&args(&["--db", d, "entity", "ABC123", "--name", "Mazda ABC123", "--detail", "Mazda 3", "--year", "2019"])).unwrap();
+        run(&args(&["--db", d, "add", "SOAT", "@Mazda", "2099-02-01"])).unwrap();
+        run(&args(&["--db", d, "relate", "Juan", "Otherwise SAS", "--role", "owner"])).unwrap();
+        run(&args(&["--db", d, "relate", "Juan", "abc-123"])).unwrap();
+        assert!(run(&args(&["--db", d, "relate", "Juan", "Juan"])).is_err());
+        assert!(run(&args(&["--db", d, "entity", "Nobody"])).is_err());
+        assert!(run(&args(&["--db", d, "entities", "--kind", "spaceship"])).is_err());
+        let s = Store::open(&db).unwrap();
+        let es = s.entities().unwrap();
+        let mut got: Vec<(&str, EntityKind)> = es.iter().map(|e| (e.name.as_str(), e.kind)).collect();
+        got.sort();
+        assert_eq!(got, vec![("Juan", EntityKind::Person), ("Mazda ABC123", EntityKind::Vehicle), ("Otherwise SAS", EntityKind::Company)]);
+        let car = es.iter().find(|e| e.kind == EntityKind::Vehicle).unwrap();
+        assert_eq!((car.ident.as_str(), car.year), ("ABC123", Some(2019)));
+        let items = s.items().unwrap();
+        assert_eq!(items.iter().filter(|i| i.entity == Some(car.id)).count(), 2);
+        assert_eq!(s.relations().unwrap().len(), 2);
+        let j = entity_json(car, &items);
+        assert_eq!((j["kind"].clone(), j["items"].clone()), (json!("vehicle"), json!(2)));
+        drop(s);
+        run(&args(&["--db", d, "relate", "Juan", "Mazda ABC123", "--remove"])).unwrap();
+        run(&args(&["--db", d, "list", "--owner", "ABC123", "--owner-kind", "vehicle"])).unwrap();
+        assert_eq!(Store::open(&db).unwrap().relations().unwrap().len(), 1);
     }
 }

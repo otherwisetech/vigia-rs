@@ -4,7 +4,7 @@ use crate::date;
 use crate::model::*;
 
 pub const COLUMNS: &[&str] = &[
-    "id", "kind", "name", "owner", "category", "issued", "expires", "recurrence", "term_months", "notice_days", "cost", "currency", "provider", "reference", "renewal_url", "auto_renews", "tags", "lead_days", "state", "host", "auto_check", "notes",
+    "id", "kind", "name", "owner", "category", "issued", "expires", "recurrence", "term_months", "notice_days", "cost", "currency", "provider", "reference", "renewal_url", "auto_renews", "tags", "lead_days", "state", "host", "auto_check", "notes", "owner_kind",
 ];
 
 fn quote(s: &str) -> String {
@@ -42,6 +42,7 @@ pub fn export(items: &[Item]) -> String {
             i.host.clone(),
             (i.auto_check as u8).to_string(),
             i.notes.clone(),
+            i.owner_kind.filter(|_| !i.owner.is_empty()).map(|k| k.id().to_string()).unwrap_or_default(),
         ];
         out.push_str(&cells.iter().map(|c| quote(c)).collect::<Vec<_>>().join(","));
         out.push('\n');
@@ -153,6 +154,7 @@ pub fn import(s: &str, today: date::Date) -> Imported {
         it.host = get("host");
         it.auto_check = matches!(get("auto_check").to_lowercase().as_str(), "1" | "true" | "yes");
         it.notes = get("notes");
+        it.owner_kind = crate::entity::EntityKind::from_id(&get("owner_kind")).filter(|_| !it.owner.is_empty());
         out.items.push(it);
     }
     out
@@ -177,6 +179,7 @@ mod tests {
         a.notes = "line one, with \"quotes\"\nline two".into();
         let mut b = Item::new(Kind::Contract, "Arriendo, apto 301");
         b.owner = " Ana ".trim().into();
+        b.owner_kind = Some(crate::entity::EntityKind::Person);
         b.expires = ymd(2027, 1, 31);
         b.notice_days = Some(60);
         b.state = State::InProgress;

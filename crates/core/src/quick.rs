@@ -1,9 +1,59 @@
 //! Quick add: one line of text → a new item. `Pasaporte @Ana 12/05/2031`, `SOAT moto en 3
 //! meses`, `otherwisetech.com 2027-08-13`, `Wyoming annual report`. The type is guessed from
-//! keywords in the four languages, `@word` is the owner, the first date found (absolute or
-//! relative) is the expiry.
+//! keywords in the four languages, `@Ana` / `@"Mazda ABC123"` / `#ABC123` is who it belongs
+//! to, the first date found (absolute or relative) is the expiry.
 use crate::date::{self, Date, Order};
+use crate::entity::{self, EntityKind};
 use crate::model::{Item, Kind};
+
+/// `@` names someone (a new name is a person unless it looks like a plate, a company or a
+/// domain); `#` points at a thing (a plate, a tax id), so a new one takes the template's kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sigil {
+    At,
+    Hash,
+}
+
+/// Takes the owner reference out of `line`: `@"two words"`, `#"two words"`, `@one_word`,
+/// `#ABC123`. Returns the rest of the line and the reference.
+pub fn take_owner(line: &str) -> (String, Option<(Sigil, String)>) {
+    let mut found = None;
+    let mut rest = String::new();
+    let chars: Vec<char> = line.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let c = chars[i];
+        let at_start = i == 0 || chars[i - 1].is_whitespace();
+        let sigil = match c {
+            '@' => Some(Sigil::At),
+            '#' => Some(Sigil::Hash),
+            _ => None,
+        };
+        if let (Some(sg), true, None) = (sigil, at_start, &found) {
+            if chars.get(i + 1) == Some(&'"')
+                && let Some(end) = chars[i + 2..].iter().position(|c| *c == '"')
+            {
+                let v: String = chars[i + 2..i + 2 + end].iter().collect();
+                if !v.trim().is_empty() {
+                    found = Some((sg, v.trim().to_string()));
+                }
+                i += end + 3;
+                continue;
+            }
+            let end = chars[i + 1..].iter().position(|c| c.is_whitespace()).map_or(chars.len(), |p| i + 1 + p);
+            let v: String = chars[i + 1..end].iter().collect();
+            // `@example.com` is a host, not an owner
+            if !v.is_empty() && (sg == Sigil::Hash || !v.contains('.')) {
+                found = Some((sg, v.replace('_', " ")));
+                i = end;
+                continue;
+            }
+        }
+        rest.push(c);
+        i += 1;
+    }
+    (rest, found)
+}
 
 /// Keyword (folded, lowercase) → type. Longer phrases first.
 const KEYWORDS: &[(&str, Kind)] = &[
@@ -118,7 +168,8 @@ fn domain_token(text: &str) -> Option<String> {
 }
 
 pub fn parse(line: &str, today: Date, order: Order) -> Item {
-    let mut rest = line.trim().to_string();
+    let (rest, owner_ref) = take_owner(line.trim());
+    let mut rest = rest.trim().to_string();
     // date first, so its words aren't mistaken for the name
     let found = date::find_dates(&rest, order).into_iter().next().or_else(|| date::find_relative(&rest, today));
     let mut expires = None;
@@ -126,16 +177,7 @@ pub fn parse(line: &str, today: Date, order: Order) -> Item {
         expires = Some(f.date);
         rest.replace_range(f.start..f.end, " ");
     }
-    let mut owner = String::new();
-    let words: Vec<&str> = rest.split_whitespace().collect();
-    let mut kept = Vec::new();
-    for w in words {
-        if let Some(o) = w.strip_prefix('@').filter(|o| !o.is_empty() && !o.contains('.')) {
-            owner = o.replace('_', " ");
-        } else {
-            kept.push(w);
-        }
-    }
+    let mut kept: Vec<&str> = rest.split_whitespace().collect();
     // connectors left dangling by the date: "vence el", "expires on"
     while kept.last().is_some_and(|w| matches!(date::fold(w).as_str(), "el" | "on" | "le" | "em" | "en" | "vence" | "expires" | "expira" | "hasta" | "until" | "jusqu'au" | "ate" | "-" | ":")) {
         kept.pop();
@@ -144,7 +186,14 @@ pub fn parse(line: &str, today: Date, order: Order) -> Item {
     let domain = domain_token(&name);
     let kind = guess_kind(&name).unwrap_or(if domain.is_some() { Kind::Domain } else { Kind::Custom });
     let mut it = Item::new(kind, if name.is_empty() { kind.label() } else { name });
-    it.owner = owner;
+    if let Some((sigil, owner)) = owner_ref {
+        let kind = match sigil {
+            Sigil::At => entity::infer(&owner).unwrap_or(EntityKind::Person),
+            Sigil::Hash => entity::infer(&owner).or(kind.entity_kind()).unwrap_or(EntityKind::Other),
+        };
+        it.owner_kind = Some(kind);
+        it.owner = owner;
+    }
     it.expires = expires;
     if matches!(kind, Kind::Domain | Kind::Certificate)
         && let Some(d) = domain
@@ -183,5 +232,29 @@ mod tests {
         // "gas" as a word, not inside "Vegas"
         assert_eq!(p("Las Vegas trip").kind, Kind::Custom);
         assert_eq!(p("").name, Kind::Custom.label());
+    }
+
+    #[test]
+    fn owners() {
+        let today = ymd(2026, 11, 20).unwrap();
+        let p = |s: &str| parse(s, today, Order::DayFirst);
+        let o = |s: &str| {
+            let it = p(s);
+            (it.owner, it.owner_kind)
+        };
+        assert_eq!(o("Pasaporte @Ana 12/05/2031"), ("Ana".into(), Some(EntityKind::Person)));
+        assert_eq!(o("SOAT #ABC123 en 3 meses"), ("ABC123".into(), Some(EntityKind::Vehicle)));
+        assert_eq!(o("Tecno @\"Mazda ABC123\" 2027-01-10"), ("Mazda ABC123".into(), Some(EntityKind::Vehicle)));
+        assert_eq!(o("RUT @\"Otherwise SAS\""), ("Otherwise SAS".into(), Some(EntityKind::Company)));
+        assert_eq!(o("Annual report @Otherwise_Technologies_LLC"), ("Otherwise Technologies LLC".into(), Some(EntityKind::Company)));
+        // a new `#thing` takes the template's kind
+        assert_eq!(o("Extintor #Apto301"), ("Apto301".into(), Some(EntityKind::Property)));
+        assert_eq!(o("Netflix #cuenta"), ("cuenta".into(), Some(EntityKind::Other)));
+        assert_eq!(o("Netflix"), (String::new(), None));
+        let t = p("Tecno @\"Mazda ABC123\" 2027-01-10");
+        assert_eq!((t.name.as_str(), t.kind, t.expires), ("Tecno", Kind::Tecnomecanica, ymd(2027, 1, 10)));
+        // an email-ish host stays in the name
+        assert_eq!(p("SSL @api.example.com").owner, "");
+        assert_eq!(take_owner("a #\"x y\" b").1, Some((Sigil::Hash, "x y".into())));
     }
 }

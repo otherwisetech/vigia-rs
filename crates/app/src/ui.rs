@@ -8,6 +8,30 @@ pub fn icon(name: IconName, size: f32, color: Hsla) -> Icon {
     Icon::new(name).size(px(size)).text_color(color)
 }
 
+pub const CAR_SVG: &str = "icons/vigia-car.svg";
+pub const HOUSE_SVG: &str = "icons/vigia-house.svg";
+pub const PAW_SVG: &str = "icons/vigia-paw.svg";
+pub const GRAPH_SVG: &str = "icons/vigia-graph.svg";
+
+/// The icon of a kind of entity (person, car, building, house, paw, globe, folder).
+pub fn entity_icon(kind: vigia_core::entity::EntityKind, size: f32, color: Hsla) -> Icon {
+    use vigia_core::entity::EntityKind as K;
+    let i = match kind {
+        K::Person => Icon::new(IconName::User),
+        K::Vehicle => Icon::empty().path(CAR_SVG),
+        K::Company => Icon::new(IconName::Building2),
+        K::Property => Icon::empty().path(HOUSE_SVG),
+        K::Pet => Icon::empty().path(PAW_SVG),
+        K::Digital => Icon::new(IconName::Globe),
+        K::Other => Icon::new(IconName::Folder),
+    };
+    i.size(px(size)).text_color(color)
+}
+
+pub fn svg_icon(path: &'static str, size: f32, color: Hsla) -> Icon {
+    Icon::empty().path(path).size(px(size)).text_color(color)
+}
+
 /// Outlined 34 px control.
 pub fn outline_button(t: &Tokens, id: impl Into<ElementId>) -> Stateful<Div> {
     let hover = t.border_strong;

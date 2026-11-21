@@ -94,7 +94,7 @@ impl VigiaApp {
                     .flex_1()
                     .min_w_0()
                     .py(px(6.))
-                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.5)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!it.owner.is_empty(), |d| d.child(div().text_size(px(12.5)).text_color(t.ink_muted).truncate().child(it.owner.clone()))))
+                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.5)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!it.owner.is_empty(), |d| d.child(div().flex().items_center().gap(px(4.)).min_w_0().text_size(px(12.5)).text_color(t.ink_muted).child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 11., t.ink_muted)).child(div().truncate().child(it.owner.clone())))))
                     .child(div().text_size(px(11.5)).text_color(t.ink_muted).truncate().child(it.kind.label())),
             )
             .child(badges)
@@ -345,7 +345,7 @@ impl VigiaApp {
     pub fn render_list(&self, t: &Tokens, cx: &mut Context<Self>) -> AnyElement {
         let today = Data::today();
         let items = self.data.read(cx).items.clone();
-        let owners = vigia_core::view::owners(&items);
+        let entities = self.data.read(cx).entities.clone();
         let rows = vigia_core::view::filtered(&items, &self.filter, today);
         let weak = cx.entity().downgrade();
         let mut seg = ui::seg_group(t).child(ui::seg(t, "st-all", i18n::t!("app.list.all"), self.filter.status.is_none()).on_click(cx.listener(|this, _, _, cx| {
@@ -358,26 +358,48 @@ impl VigiaApp {
                 cx.notify();
             })));
         }
-        let cur_owner = self.filter.owner.clone();
+        let (cur_ent, cur_kind) = (self.filter.entity, self.filter.entity_kind);
+        let owner_label = match (cur_ent.and_then(|id| entities.iter().find(|e| e.id == id)), cur_kind) {
+            (Some(e), _) => e.name.clone(),
+            (None, Some(k)) => crate::entities::section_title_case(k),
+            (None, None) => i18n::t!("app.list.everyone"),
+        };
         let w = weak.clone();
-        let owner_btn = Button::new("f-owner").outline().small().icon(IconName::User).label(cur_owner.clone().unwrap_or_else(|| i18n::t!("app.list.everyone"))).dropdown_menu(move |mut menu, _, _| {
+        let owner_btn = Button::new("f-owner").outline().small().icon(IconName::User).label(owner_label).dropdown_menu(move |mut menu, _, _| {
             let w0 = w.clone();
-            menu = menu.item(PopupMenuItem::new(i18n::t!("app.list.everyone")).checked(cur_owner.is_none()).on_click(move |_, _, cx| {
+            menu = menu.item(PopupMenuItem::new(i18n::t!("app.list.everyone")).checked(cur_ent.is_none() && cur_kind.is_none()).on_click(move |_, _, cx| {
                 w0.update(cx, |this, cx| {
-                    this.filter.owner = None;
+                    this.filter.entity = None;
+                    this.filter.entity_kind = None;
                     cx.notify();
                 })
                 .ok();
             }));
-            for o in &owners {
-                let (w1, o1) = (w.clone(), o.clone());
-                menu = menu.item(PopupMenuItem::new(o.clone()).checked(cur_owner.as_deref() == Some(o.as_str())).on_click(move |_, _, cx| {
-                    w1.update(cx, |this, cx| {
-                        this.filter.owner = Some(o1.clone());
+            for k in vigia_core::entity::EntityKind::ALL {
+                let mine: Vec<_> = entities.iter().filter(|e| e.kind == k).collect();
+                if mine.is_empty() {
+                    continue;
+                }
+                let wk = w.clone();
+                menu = menu.separator().item(PopupMenuItem::new(crate::entities::section_title_case(k)).checked(cur_ent.is_none() && cur_kind == Some(k)).on_click(move |_, _, cx| {
+                    wk.update(cx, |this, cx| {
+                        this.filter.entity = None;
+                        this.filter.entity_kind = Some(k);
                         cx.notify();
                     })
                     .ok();
                 }));
+                for e in mine {
+                    let (w1, id) = (w.clone(), e.id);
+                    menu = menu.item(PopupMenuItem::new(e.name.clone()).checked(cur_ent == Some(id)).on_click(move |_, _, cx| {
+                        w1.update(cx, |this, cx| {
+                            this.filter.entity = Some(id);
+                            this.filter.entity_kind = None;
+                            cx.notify();
+                        })
+                        .ok();
+                    }));
+                }
             }
             menu
         });
