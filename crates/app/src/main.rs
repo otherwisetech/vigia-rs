@@ -25,11 +25,13 @@ use std::path::PathBuf;
 use std::time::Duration;
 use vigia_core::settings::Settings;
 
-actions!(vigia, [Quit, OpenWebsite]);
+actions!(vigia, [Quit, OpenWebsite, OpenVcity]);
 
 pub(crate) const APP_NAME: &str = "Vigía"; // i18n-ok: product name
 pub(crate) const COMPANY: &str = "Otherwise Technologies LLC"; // i18n-ok: company name
 pub(crate) const COMPANY_URL: &str = "https://otherwisetech.com";
+/// The invitation to Vcity (About and the Help menu).
+pub(crate) const VCITY_URL: &str = "https://vcity.io/?utm_source=vigia&utm_medium=app&utm_campaign=otherwise-apps";
 pub(crate) const REPO_URL: &str = "https://github.com/otherwisetech/vigia-rs";
 pub(crate) const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -98,7 +100,8 @@ pub(crate) fn set_app_menus(cx: &mut App) {
         ],
         disabled: false,
     };
-    cx.set_menus(vec![app_menu, file, view, item]);
+    let help = Menu { name: i18n::t!("app.menu.help").into(), items: vec![MenuItem::action(i18n::t!("app.vcity.menu"), OpenVcity)], disabled: false };
+    cx.set_menus(vec![app_menu, file, view, item, help]);
 }
 
 /// gpui-component's icon set plus our own mark.
@@ -416,6 +419,7 @@ fn main() {
         cx.bind_keys([KeyBinding::new("secondary-q", Quit, None)]);
         cx.on_action(|_: &Quit, cx| cx.quit());
         cx.on_action(|_: &OpenWebsite, cx| cx.open_url(COMPANY_URL));
+        cx.on_action(|_: &OpenVcity, cx| cx.open_url(VCITY_URL));
         cx.on_action(|_: &app::NewItem, cx| open_main_window(cx));
         gpui_component::set_locale(i18n::locale());
         set_app_menus(cx);

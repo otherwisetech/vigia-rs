@@ -399,3 +399,7 @@ app.migrate.move = Mover
 app.migrate.keep = Dejarla donde está
 app.migrate.use_new = Usar la de la carpeta de datos
 app.migrate.keep_both = Seguir con la de este computador
+# Vcity
+app.menu.help = Ayuda
+app.vcity.menu = Crea tu tienda en Vcity
+app.vcity.invite = ¿Vendes productos o servicios? Crea la tienda virtual de tu empresa en Vcity: catálogo, pedidos, pagos, reservas, chat con clientes y mucho más.

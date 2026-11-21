@@ -941,6 +941,15 @@ impl VigiaApp {
             .child(
                 div()
                     .flex()
+                    .flex_col()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(div().text_center().text_size(px(12.)).line_height(px(17.)).text_color(t.ink_muted).child(i18n::t!("app.vcity.invite")))
+                    .child(div().id("about-vcity").text_size(px(12.)).text_color(accent).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.vcity.menu")).on_click(|_, _, cx| cx.open_url(crate::VCITY_URL))),
+            )
+            .child(
+                div()
+                    .flex()
                     .items_center()
                     .gap(px(14.))
                     .child(div().id("about-source").text_size(px(12.)).text_color(accent).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.about.source")).on_click(|_, _, cx| cx.open_url(crate::REPO_URL)))

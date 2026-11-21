@@ -399,3 +399,7 @@ app.migrate.move = Déplacer
 app.migrate.keep = La laisser où elle est
 app.migrate.use_new = Utiliser celle du dossier de données
 app.migrate.keep_both = Garder celle de cet ordinateur
+# Vcity
+app.menu.help = Aide
+app.vcity.menu = Créez votre boutique sur Vcity
+app.vcity.invite = Vous vendez des produits ou des services ? Créez la boutique en ligne de votre entreprise sur Vcity : catalogue, commandes, paiements, réservations, chat avec les clients et bien plus.

@@ -399,3 +399,7 @@ app.migrate.move = Mover
 app.migrate.keep = Manter onde está
 app.migrate.use_new = Usar o da pasta de dados
 app.migrate.keep_both = Manter o deste computador
+# Vcity
+app.menu.help = Ajuda
+app.vcity.menu = Crie sua loja na Vcity
+app.vcity.invite = Vende produtos ou serviços? Crie a loja virtual da sua empresa na Vcity: catálogo, pedidos, pagamentos, reservas, chat com clientes e muito mais.

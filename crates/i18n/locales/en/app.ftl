@@ -399,3 +399,7 @@ app.migrate.move = Move
 app.migrate.keep = Keep Where It Is
 app.migrate.use_new = Use the One in the Data Folder
 app.migrate.keep_both = Keep This Computer’s
+# Vcity
+app.menu.help = Help
+app.vcity.menu = Create your store on Vcity
+app.vcity.invite = Sell products or services? Create your business's online store on Vcity — catalog, orders, payments, bookings, customer chat and more.
