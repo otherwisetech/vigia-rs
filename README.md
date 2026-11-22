@@ -144,9 +144,14 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
   | `otherwise://vigia/entity/<uuid>` | the entity linked to a shared card |
   | `otherwise://vigia/new?kind=certificate&name=…&owner=…&expires=YYYY-MM-DD&host=…` | the new-item form, prefilled (also `text` = a quick-add line, `owner_kind`, `entity`, `issued`, `months`, `provider`, `reference`, `url`, `notes`, `tags`, `check=1`); nothing is saved until you do |
 
+- **Calendar.** Every live item's deadline (expiry, or a contract's notice deadline) and its
+  next reminder day, from 60 days back to 18 months ahead, go to `<data folder>/vigia/events.json`
+  for Otherwise Apps' Calendar (otherwise-link SPEC §9), each linking to `otherwise://vigia/item/<id>`;
+  health items are private there ("Busy" in exports and for assistants). The same Settings switch
+  as Today turns it off.
 - **Today.** What is overdue or due in the next 30 days goes to `today/vigia.json`, which
   Otherwise Apps shows in its Today view, each with a link to the item. Rewritten when it
-  changes; Settings → *Show what's due in the Today view* turns it off (and removes the file).
+  changes; Settings → *Show what’s due in Today and Calendar* turns it off (and removes the file).
   `vigia today` publishes it from the command line.
 - **Shared entities** (only when turned on in Otherwise Apps). People, companies, vehicles,
   properties and digital assets are synced both ways with the shared registry: matched by card

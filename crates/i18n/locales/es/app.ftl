@@ -358,7 +358,7 @@ app.edit.biz_weekends = Solo fines de semana
 
 # Otherwise Apps: Today view, shared registry, deep links
 app.settings.otherwise = Otherwise Apps
-app.settings.today = Mostrar lo que vence en la vista Hoy de Otherwise Apps
+app.settings.today = Mostrar lo que vence en Hoy y en el Calendario de Otherwise Apps
 app.settings.registry_on = Personas, vehículos, empresas, inmuebles y activos digitales se comparten con las demás apps de Otherwise (activado en Otherwise Apps).
 app.settings.registry_off = Compartir personas, vehículos y empresas con las demás apps de Otherwise está desactivado; se activa en Otherwise Apps.
 app.link.not_found = Eso no está en esta base de datos de Vigía.

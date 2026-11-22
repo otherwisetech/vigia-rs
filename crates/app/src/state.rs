@@ -309,10 +309,13 @@ impl Data {
         if !Settings::load().today_feed() {
             if self.last_feed != "off" {
                 let _ = vigia_core::feed::clear(&root);
+                let _ = vigia_core::calendar_feed::clear(&root);
                 self.last_feed = "off".into();
             }
             return;
         }
+        // the Calendar's file; otherwise-link skips the write when nothing changed
+        let _ = vigia_core::calendar_feed::publish(&root, &self.items, &self.entities, Self::today());
         let events = vigia_core::feed::events(&self.items, &self.entities, Self::today());
         let sig = serde_json::to_string(&events).unwrap_or_default();
         if sig != self.last_feed && otherwise_link::today::publish(&root, vigia_core::sync::APP, &events).is_ok() {
