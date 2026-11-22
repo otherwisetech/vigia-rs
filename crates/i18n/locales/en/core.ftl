@@ -171,3 +171,4 @@ core.cal.not_ics = That isn't an iCalendar (.ics) file.
 
 # shared registry of the Otherwise apps
 core.sync.error = Shared registry: {detail}
+core.cal.reminder = Reminder: {title}

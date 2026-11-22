@@ -358,7 +358,7 @@ app.edit.biz_weekends = Weekends only
 
 # Otherwise Apps: Today view, shared registry, deep links
 app.settings.otherwise = Otherwise Apps
-app.settings.today = Show what's due in the Today view of Otherwise Apps
+app.settings.today = Show what's due in Otherwise Apps' Today and Calendar
 app.settings.registry_on = People, vehicles, companies, properties and digital assets are shared with the other Otherwise apps (turned on in Otherwise Apps).
 app.settings.registry_off = Sharing people, vehicles and companies with the other Otherwise apps is off; it can be turned on in Otherwise Apps.
 app.link.not_found = That isn't in this Vigía database.

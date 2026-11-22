@@ -252,10 +252,12 @@ pub(crate) fn publish_today(s: &Store) -> Option<usize> {
     let root = otherwise_link::Root::system();
     if !vigia_core::settings::Settings::load().today_feed() {
         let _ = vigia_core::feed::clear(&root);
+        let _ = vigia_core::calendar_feed::clear(&root);
         return None;
     }
     let items = s.items().ok()?;
     let entities = s.entities().ok()?;
+    let _ = vigia_core::calendar_feed::publish(&root, &items, &entities, date::today());
     vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
 }
 
