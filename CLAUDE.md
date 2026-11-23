@@ -25,7 +25,7 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
 crates/i18n   vigia-i18n: embedded translation catalogs, t!/tn!/tv! macros, i18n guard tests
 crates/cli    `vigia`: list / due / show / add / edit / renew / delete / check / export /
               import / backup / kinds / entities / entity / relate / holidays / today / sync /
-              path / mcp (mcp.rs: stdio MCP server, read-only unless --allow-writes), `--json`
+              path / mcp (mcp.rs: stdio MCP server, read-only unless --allow-writes or --propose), `--json`
               everywhere; background.rs: `vigia background manifest | run reminders|checks`
 crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, background tick
               (reminders every 30 s, checks hourly), menu-bar pump; state.rs: `Data` entity held
@@ -85,6 +85,14 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   otherwise-link dependency is a git tag; bumping it must only change its own Cargo.lock entry.
 - Every core change ships with a test on synthetic data. Tests must pass on macOS, Linux and
   Windows: no assumptions about installed tools, paths, locale or time zone (pass `today`).
+- **The assistant is the shared AI panel** (`otherwise-agent-panel`, `app/src/assistant.rs`,
+  ⌘J): the user's Claude Code / Codex / opencode with `vigia mcp --db <open db>` for that
+  session only (never write the user's agent configs). The panel never gets `--allow-writes`:
+  outside "Solo lectura" it starts `--propose <app dir>/assistant/live/<pid>/proposals`, where
+  `add_item` / `renew_item` only validate and drop a `vigia_core::agent::Proposal`; the window
+  polls it, shows cards and applies them with the same parsing (`agent::item_from_args`,
+  `renewal_from_args`) through `Data::save` / `Data::renew` on Aplicar. A database open on
+  another computer gets read tools only.
 - In app test modules don't `use super::*` (gpui's glob exports its own `test` attribute).
 - Comments: sparse, only non-obvious why.
 - GPUI pins: `Cargo.lock` pins zed `eb5483528be607b497afdaad0a237bebeb191249` and gpui-component

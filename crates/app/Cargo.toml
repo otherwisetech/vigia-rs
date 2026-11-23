@@ -21,6 +21,8 @@ otherwise-link.workspace = true
 uuid.workspace = true
 # GitHub star count (one GET a day)
 ureq = { version = "3", default-features = false, features = ["rustls"] }
+# the shared AI panel (⌘J); it starts `vigia mcp` for a session
+otherwise-agent-panel = { git = "https://github.com/otherwisetech/otherwise-agent-panel", tag = "v0.1.0" }
 gpui.workspace = true
 gpui_platform.workspace = true
 gpui-component.workspace = true

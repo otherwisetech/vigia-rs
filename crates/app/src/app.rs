@@ -163,10 +163,12 @@ pub struct VigiaApp {
     pub about: bool,
     toast: Option<(String, Instant)>,
     pub logo: Arc<Image>,
-    focus: FocusHandle,
+    pub focus: FocusHandle,
     pub cal_month: Date,
     placeholder_locale: &'static str,
     pub ocr_busy: bool,
+    /// the AI panel and its cards
+    pub agent: crate::assistant::AgentState,
     _subs: Vec<Subscription>,
 }
 
@@ -212,7 +214,7 @@ impl VigiaApp {
         let title = window_title(data.read(cx));
         window.set_window_title(&title);
         let migration = data.read(cx).migration.clone();
-        VigiaApp {
+        let mut this = VigiaApp {
             data,
             view: View::from_id(Settings::load().view.as_deref().unwrap_or_default()),
             filter: Filter::default(),
@@ -231,8 +233,11 @@ impl VigiaApp {
             cal_month: date::month_start(Data::today()),
             placeholder_locale: "",
             ocr_busy: false,
+            agent: crate::assistant::AgentState::new(),
             _subs: subs,
-        }
+        };
+        this.start_agent_pump(cx);
+        this
     }
 
     // ── small actions ────────────────────────────────────────────────────────────────────────
@@ -357,6 +362,7 @@ impl VigiaApp {
         if i18n::set_locale(code) {
             Settings::update(|s| s.language = Some(code.to_string()));
             gpui_component::set_locale(code);
+            crate::assistant::sync_locale();
             crate::set_app_menus(cx);
             crate::sync_tray(cx);
             cx.refresh_windows();
@@ -704,6 +710,7 @@ impl VigiaApp {
             .child(quick)
             .child(div().flex_1())
             .when(self.ocr_busy, |d| d.child(div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(t.ink_muted).child(gpui_component::spinner::Spinner::new().small().color(t.accent)).child(i18n::t!("app.ocr.reading"))))
+            .child(ui::icon_button(t, "top-assistant", IconName::Bot, true).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.assistant.toggle")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.toggle_agent_panel(window, cx))))
             .child(ui::outline_button(t, "top-ocr").child(icon(IconName::File, 15., t.ink)).child(i18n::t!("app.ocr.button")).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.ocr.tooltip")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.read_document_dialog(None, window, cx))))
             .child(ui::filled_button(t, "top-new", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(i18n::t!("app.item.new_short")).on_click(cx.listener(|this, _, window, cx| this.new_item(window, cx))))
             .child(lang)
@@ -1000,6 +1007,7 @@ impl Render for VigiaApp {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_placeholders(window, cx);
         let t = tokens(cx);
+        VigiaApp::sync_agent_style(&t, cx);
         let error = self.data.read(cx).error.clone();
         let body: AnyElement = match error {
             Some(e) if self.data.read(cx).store.is_none() => self.render_failed(&t, &e, cx).into_any_element(),

@@ -22,7 +22,7 @@ struct Args {
 }
 
 /// Options that take a value; everything else starting with `--` is a flag.
-const WITH_VALUE: &[&str] = &["db", "days", "status", "owner", "owner-kind", "business-days", "country", "year", "ident", "detail", "role", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
+const WITH_VALUE: &[&str] = &["propose", "db", "days", "status", "owner", "owner-kind", "business-days", "country", "year", "ident", "detail", "role", "category", "kind", "name", "expires", "issued", "host", "notes", "cost", "currency", "note", "provider", "reference", "lead", "recurrence", "notice", "months", "url", "tags"];
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
     let mut a = Args::default();
@@ -515,7 +515,7 @@ fn run_command(a: &Args) -> Result<(), String> {
         }
         "mcp" => {
             let db = vigia_core::paths::resolve_db(a.db.as_deref()).ok_or_else(|| i18n::t!("cli.err.no_data_dir"))?;
-            let mut srv = mcp::Server { db, writes: a.flag("allow-writes"), publish: is_users_db(a) };
+            let mut srv = mcp::Server { db, writes: a.flag("allow-writes"), publish: is_users_db(a), propose: a.opt("propose").map(PathBuf::from) };
             srv.serve(std::io::stdin().lock(), std::io::stdout().lock()).map_err(|e| e.to_string())?;
         }
         "" | "help" => println!("{}", i18n::t!("cli.usage")),

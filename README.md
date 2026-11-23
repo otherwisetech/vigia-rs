@@ -160,13 +160,30 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
   leaves the entity in Vigía (detached), and deleting an entity here only unlinks it. Pets and
   "other" stay local. `vigia sync` runs it from the command line; the app syncs after edits
   and every 5 minutes.
-- **MCP.** `vigia mcp` is a stdio MCP server, read-only: `list_items`, `due`, `entities`, `item`.
-  With `--allow-writes` (which Otherwise Apps' hub passes only when you allow write tools) it
-  adds `add_item` and `renew_item`.
+- **MCP.** `vigia mcp` is a stdio MCP server, read-only: `summary`, `checks`, `entity`,
+  `list_items`, `due`, `entities`, `item`. With `--allow-writes` (which Otherwise Apps' hub
+  passes only when you allow write tools) it adds `add_item` and `renew_item`; with
+  `--propose <folder>` (the app's assistant) those two only leave a proposal for the app.
 
   ```bash
   claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Apps' hub
   ```
+
+## AI assistant (⌘J)
+
+The **Asistente** button (or ⌘J) docks the shared Otherwise AI panel
+([otherwise-agent-panel](https://github.com/otherwisetech/otherwise-agent-panel)) next to every
+view, as a bar, at the bottom, on the right or full window, in Chat or Terminal mode. It runs
+**your own** Claude Code, Codex or opencode with `vigia mcp` on the open database for that
+session only; your agent's configuration is never changed. Try *¿Qué está vencido y desde
+cuándo?*, *¿Qué certificados y dominios vencen pronto?*, *Resume lo que vence este mes* or
+*¿Qué revisiones automáticas están fallando?*.
+
+It reads items, deadlines, renewal history, domain / certificate check results and owners. In
+*Preguntar antes de cambiar* or *Automático* it may propose adding an item or recording a
+renewal: each proposal is a card, saved only when you press *Aplicar*. What you ask and what
+the assistant reads goes to the provider you picked, with your own account; the panel says so
+under the input.
 
 ## Privacy
 
