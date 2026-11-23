@@ -49,3 +49,20 @@ cli.today.done.other = {n} événements publiés dans la vue Aujourd'hui d'Other
 cli.today.off = La vue Aujourd'hui est désactivée (Réglages de Vigía).
 cli.sync.off = Le registre partagé est désactivé. Activez-le dans Otherwise Apps.
 cli.sync.done = Registre partagé : {pushed} envoyés, {pulled} reçus, {created} nouveaux.
+
+# tâches en arrière-plan (Otherwise Helper)
+cli.bg.reminders_label = Rappels d’échéances
+cli.bg.checks_label = Vérification des domaines et certificats
+cli.bg.unknown_job = Tâche en arrière-plan inconnue
+cli.bg.app_open = Vigía est ouvert et s’en charge
+cli.bg.elsewhere = la base de données est ouverte sur {host}
+cli.bg.failed = exécution impossible : {error}
+cli.bg.no_reminders = aucun rappel en attente
+cli.bg.reminded.one = {n} rappel envoyé
+cli.bg.reminded.other = {n} rappels envoyés
+cli.bg.down = {item} : la vérification a échoué
+cli.bg.recovered = {item} répond de nouveau
+cli.bg.renewed = {item} renouvelé jusqu’au {date}
+cli.bg.failing.one = {n} vérification en échec
+cli.bg.failing.other = {n} vérifications en échec
+cli.bg.all_ok = toutes les vérifications sont OK

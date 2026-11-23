@@ -49,3 +49,20 @@ cli.today.done.other = {n} events published to the Today view of Otherwise Apps.
 cli.today.off = The Today feed is off (Settings in Vigía).
 cli.sync.off = The shared registry is off. Turn it on in Otherwise Apps.
 cli.sync.done = Shared registry: {pushed} sent, {pulled} received, {created} new.
+
+# background jobs (Otherwise Helper)
+cli.bg.reminders_label = Deadline reminders
+cli.bg.checks_label = Domain and certificate checks
+cli.bg.unknown_job = Unknown background job
+cli.bg.app_open = Vigía is open and does this itself
+cli.bg.elsewhere = the database is open on {host}
+cli.bg.failed = couldn't run: {error}
+cli.bg.no_reminders = no reminders due
+cli.bg.reminded.one = {n} reminder sent
+cli.bg.reminded.other = {n} reminders sent
+cli.bg.down = {item}: check failed
+cli.bg.recovered = {item} is reachable again
+cli.bg.renewed = {item} renewed until {date}
+cli.bg.failing.one = {n} check failing
+cli.bg.failing.other = {n} checks failing
+cli.bg.all_ok = all checks OK

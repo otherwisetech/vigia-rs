@@ -49,3 +49,20 @@ cli.today.done.other = {n} eventos publicados na visão Hoje do Otherwise Apps.
 cli.today.off = A visão Hoje está desativada (Ajustes do Vigía).
 cli.sync.off = O registro compartilhado está desativado. Ative-o no Otherwise Apps.
 cli.sync.done = Registro compartilhado: {pushed} enviados, {pulled} recebidos, {created} novos.
+
+# trabalhos em segundo plano (Otherwise Helper)
+cli.bg.reminders_label = Lembretes de vencimentos
+cli.bg.checks_label = Verificação de domínios e certificados
+cli.bg.unknown_job = Trabalho em segundo plano desconhecido
+cli.bg.app_open = o Vigía está aberto e faz isso sozinho
+cli.bg.elsewhere = o banco de dados está aberto em {host}
+cli.bg.failed = não foi possível executar: {error}
+cli.bg.no_reminders = nenhum lembrete pendente
+cli.bg.reminded.one = {n} lembrete enviado
+cli.bg.reminded.other = {n} lembretes enviados
+cli.bg.down = {item}: a verificação falhou
+cli.bg.recovered = {item} voltou a responder
+cli.bg.renewed = {item} renovado até {date}
+cli.bg.failing.one = {n} verificação falhando
+cli.bg.failing.other = {n} verificações falhando
+cli.bg.all_ok = todas as verificações OK

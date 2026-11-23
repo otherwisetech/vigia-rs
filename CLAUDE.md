@@ -20,12 +20,13 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               (map layout + camera math, deterministic), holidays.rs (computed public holidays,
               business-day shift), calendars.rs (read-only .ics overlays); otherwise-link
               integration: links.rs (deep-link routes, `new?…` prefill), feed.rs (Today
-              events), sync.rs (two-way sync with the shared entity registry)
+              events), sync.rs (two-way sync with the shared entity registry), background.rs
+              (Otherwise Helper's jobs: reminders, checks with down / recovered / renewed)
 crates/i18n   vigia-i18n: embedded translation catalogs, t!/tn!/tv! macros, i18n guard tests
 crates/cli    `vigia`: list / due / show / add / edit / renew / delete / check / export /
               import / backup / kinds / entities / entity / relate / holidays / today / sync /
               path / mcp (mcp.rs: stdio MCP server, read-only unless --allow-writes), `--json`
-              everywhere
+              everywhere; background.rs: `vigia background manifest | run reminders|checks`
 crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, background tick
               (reminders every 30 s, checks hourly), menu-bar pump; state.rs: `Data` entity held
               by the app (not the window) so reminders run with the window closed; app.rs:
@@ -57,11 +58,17 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   (never edit a shipped one) plus a test. Attachments are copied (never moved) into
   `vigia-files/<item id>/` and referenced by relative `/`-separated paths.
 - **Network only for opt-in checks.** RDAP and TLS run for items with `auto_check`, daily while
-  the app runs (or `vigia check`). A calendar URL is downloaded only when the user adds or
+  the app runs, from Otherwise Helper's `checks` job while it is closed (or `vigia check`). A calendar URL is downloaded only when the user adds or
   refreshes it. The OCR models are downloaded only after the user confirms.
   The star count is the only other request (once a day, off switch). Tests never touch the
   network: parsers run on fixtures in `crates/core/tests/fixtures`, checks through the `Checker`
   trait's fakes.
+- **Background jobs (Otherwise Helper)**: declared in the bundle
+  (`Contents/Resources/otherwise-background.json`, written by the bundle script from `vigia
+  background manifest`), run as `vigia background run reminders|checks` only while the app is
+  closed (`whileOpen: false`; the app does both itself). They take the database's lock for the
+  run and leave it alone when another process here or another computer holds it; only the
+  user's own database. Checks keep `bg.check.<id>` meta (ok / fail) to notify once per outage.
 - **Reminders are pure.** `reminder::plan(items, today, sent)` decides; the app records what it
   returns (`notify` + `silent`) in `reminders_sent`. Only the most urgent due reminder per item
   notifies; older ones are recorded silently (no bursts). Renewing changes the deadline, so a new

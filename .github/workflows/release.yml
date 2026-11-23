@@ -63,6 +63,7 @@ jobs:
           pkg=vigia-${{ matrix.name }}
           mkdir -p dist/$pkg
           cp target/release/vigia-app target/release/vigia dist/$pkg/
+          target/release/vigia background manifest > dist/$pkg/otherwise-background.json
           cp packaging/linux/io.github.otherwisetech.vigia-app.desktop dist/$pkg/
           cp crates/app/assets/logo/vigia-icon-1024.png dist/$pkg/vigia.png
           cp README.md LICENSE-MIT LICENSE-APACHE dist/$pkg/
@@ -77,6 +78,7 @@ jobs:
           $pkg = "vigia-${{ matrix.name }}"
           New-Item -ItemType Directory -Force -Path dist/$pkg | Out-Null
           Copy-Item target/release/vigia-app.exe, target/release/vigia.exe dist/$pkg/
+          target/release/vigia.exe background manifest | Out-File -Encoding utf8NoBOM dist/$pkg/otherwise-background.json
           Copy-Item README.md, LICENSE-MIT, LICENSE-APACHE dist/$pkg/
           Compress-Archive -Path dist/$pkg -DestinationPath dist/$pkg.zip
           Remove-Item -Recurse dist/$pkg

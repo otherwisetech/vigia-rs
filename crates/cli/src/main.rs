@@ -1,5 +1,6 @@
 //! `vigia`: the headless command line on Vigía's engine, for scripts and AI agents. Every
 //! command takes `--json` for machine-readable output and `--db PATH` to use another database.
+mod background;
 mod mcp;
 
 use serde_json::{Value, json};
@@ -528,6 +529,9 @@ fn main() {
     let lang = std::env::var("VIGIA_LANG").ok().or(s.language).or_else(|| std::env::var("LANG").ok()).and_then(|l| i18n::match_system(&l)).unwrap_or(i18n::DEFAULT);
     i18n::set_locale(lang);
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if argv.first().map(String::as_str) == Some("background") {
+        std::process::exit(background::run(&argv[1..]));
+    }
     let a = match parse_args(&argv) {
         Ok(a) => a,
         Err(e) => {
