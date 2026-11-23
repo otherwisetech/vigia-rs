@@ -403,3 +403,20 @@ app.migrate.keep_both = Manter o deste computador
 app.menu.help = Ajuda
 app.vcity.menu = Crie sua loja na Vcity
 app.vcity.invite = Vende produtos ou serviços? Crie a loja virtual da sua empresa na Vcity: catálogo, pedidos, pagamentos, reservas, chat com clientes e muito mais.
+
+# AI panel (⌘J)
+app.assistant.toggle = Assistente (⌘J)
+app.assistant.card_add = Adicionar {name}
+app.assistant.card_owner = De: {owner}
+app.assistant.card_expires = Vence: {date}
+app.assistant.card_renew = Renovar {name}
+app.assistant.card_renew_dates = Vencimento: {before} → {after}
+app.assistant.card_cost = Custo: {cost}
+app.assistant.card_reason = Motivo: {reason}
+app.assistant.no_date = sem data
+app.assistant.card_gone = Esta proposta não está mais disponível.
+app.assistant.applied = Salvo: {name}
+app.assistant.suggest_overdue = O que está vencido e desde quando?
+app.assistant.suggest_certs = Quais certificados e domínios vencem em breve?
+app.assistant.suggest_month = Resuma o que vence este mês
+app.assistant.suggest_checks = Quais verificações automáticas de domínios e certificados estão falhando?

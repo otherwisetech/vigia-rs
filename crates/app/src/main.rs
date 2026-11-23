@@ -3,6 +3,7 @@
 #![recursion_limit = "512"]
 
 mod app;
+mod assistant;
 mod dialogs;
 mod entities;
 mod graph;
@@ -222,7 +223,12 @@ fn open_main_window(cx: &mut App) {
     let handle = cx.open_window(window_options, |window, cx| {
         let view = cx.new(|cx| app::VigiaApp::new(window, cx));
         cx.global_mut::<Handles>().app = Some(view.downgrade());
-        cx.new(|cx| Root::new(view, window, cx))
+        let focus = view.read(cx).focus.clone();
+        let host: std::rc::Rc<dyn otherwise_agent_panel::ui::AgentHost> = std::rc::Rc::new(assistant::Host { app: view.downgrade() });
+        let dock = cx.new(|cx| otherwise_agent_panel::ui::AgentDock::new(view.clone(), Some(focus), host, window, cx));
+        let panel = dock.read(cx).panel().downgrade();
+        view.update(cx, |v, _| v.agent.panel = Some(panel));
+        cx.new(|cx| Root::new(dock, window, cx))
     });
     if let Ok(h) = handle {
         cx.global_mut::<Handles>().window = Some(h.into());
@@ -410,6 +416,9 @@ fn main() {
         #[cfg(target_os = "macos")]
         set_dock_icon();
         gpui_component::init(cx);
+        otherwise_agent_panel::ui::init(cx);
+        assistant::sync_locale();
+        cx.on_app_quit(|_| async { assistant::remove_live_dir() }).detach();
         app::sync_theme(None, cx);
         app::bind_keys(cx);
         let data = cx.new(|_| data);

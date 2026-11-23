@@ -1,8 +1,10 @@
 //! `vigia mcp`: a stdio MCP server (JSON-RPC 2.0, one message per line) over one Vigía
-//! database, proxied by Otherwise Apps' `otherwise-hub` as `vigia.*`. Read-only unless started
-//! with `--allow-writes` (the hub passes it only when the user enabled write tools); writes only
-//! add items or renew them (the renewal history keeps the old date). The database is opened
-//! fresh for every call, so the server sees what the app wrote.
+//! database, proxied by Otherwise Apps' `otherwise-hub` as `vigia.*` and started by the app's AI
+//! panel for one session. Read-only unless started with `--allow-writes` (the hub passes it only
+//! when the user enabled write tools) or `--propose <folder>` (the panel: the write tools only
+//! check the change and leave it in that folder for the app to show as a card). Writes only add
+//! items or renew them (the renewal history keeps the old date). The database is opened fresh
+//! for every call, so the server sees what the app wrote.
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 use std::path::PathBuf;
@@ -19,7 +21,11 @@ pub struct Server {
     pub writes: bool,
     /// The user's own database: writes refresh the Today feed.
     pub publish: bool,
+    /// The app's proposals folder: write tools become cards there instead of writing.
+    pub propose: Option<PathBuf>,
 }
+
+const PROPOSE_NOTE: &str = " In this session it is a proposal: the user sees it as a card in Vigía and it is saved only if they accept it, so tell them to review the card instead of saying it is done."; // i18n-ok: for agents
 
 const HELP: &str = "Vigía tracks things that expire: documents, vehicle papers, warranties, domains, TLS certificates, insurance, contracts, company filings. Items belong to entities (people, vehicles, companies, properties, digital assets). Dates are YYYY-MM-DD; days_left is negative once overdue."; // i18n-ok: for agents
 
@@ -31,12 +37,15 @@ struct Tool {
 }
 
 const TOOLS: &[Tool] = &[
+    Tool { name: "summary", description: "What needs attention: counts per status (expired, soon = within 30 days, upcoming, ok, undated), the next deadlines, and automatic domain / certificate checks that are failing.", schema: || json!({"type": "object", "properties": {}}), write: false }, // i18n-ok: for agents
+    Tool { name: "checks", description: "Domains and TLS certificates: host, expiry, days left, whether the automatic check (RDAP / TLS) is on, when it last ran and its last result (check_note). failing_only lists those whose last check failed.", schema: || json!({"type": "object", "properties": {"failing_only": {"type": "boolean"}}}), write: false }, // i18n-ok: for agents
+    Tool { name: "entity", description: "One owner (person, vehicle, company, property, pet, digital asset) by id, name or plate / tax id: its items, most urgent first, and its relations to other entities.", schema: || json!({"type": "object", "properties": {"owner": {"type": "string"}}, "required": ["owner"]}), write: false }, // i18n-ok: for agents
     Tool { name: "list_items", description: "Items, most urgent first. Filters: query (text), status (expired|soon|upcoming|ok|undated), category, owner (entity name, plate or id), include_archived.", schema: || json!({"type": "object", "properties": {"query": {"type": "string"}, "status": {"type": "string", "enum": ["expired", "soon", "upcoming", "ok", "undated"]}, "category": {"type": "string"}, "owner": {"type": "string"}, "include_archived": {"type": "boolean"}}}), write: false }, // i18n-ok: for agents
     Tool { name: "due", description: "Items overdue or due within `days` (default 30), most urgent first.", schema: || json!({"type": "object", "properties": {"days": {"type": "integer", "minimum": 0}}}), write: false }, // i18n-ok: for agents
     Tool { name: "entities", description: "Who or what items belong to (person, vehicle, company, property, pet, digital, other), with item counts and their shared registry id when synced.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string"}}}), write: false }, // i18n-ok: for agents
     Tool { name: "item", description: "One item with its renewal history and attachments.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}), write: false }, // i18n-ok: for agents
-    Tool { name: "add_item", description: "Add an item: `text` is a quick-add line (\"Pasaporte @Ana 12/05/2031\"); kind, name, owner, expires (YYYY-MM-DD), host, notes override it.", schema: || json!({"type": "object", "properties": {"text": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "host": {"type": "string"}, "notes": {"type": "string"}}}), write: true }, // i18n-ok: for agents
-    Tool { name: "renew_item", description: "Record a renewal: the new expiry (default: the suggested next one), optional cost and note. The old date stays in the history.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}, "expires": {"type": "string"}, "cost": {"type": "number"}, "note": {"type": "string"}}, "required": ["id"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "add_item", description: "Add an item: `text` is a quick-add line (\"Pasaporte @Ana 12/05/2031\"); kind, name, owner, expires (YYYY-MM-DD), host, notes override it.", schema: || json!({"type": "object", "properties": {"text": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "host": {"type": "string"}, "notes": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}}), write: true }, // i18n-ok: for agents
+    Tool { name: "renew_item", description: "Record a renewal: the new expiry (default: the suggested next one), optional cost and note. The old date stays in the history.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}, "expires": {"type": "string"}, "cost": {"type": "number"}, "note": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["id"]}), write: true }, // i18n-ok: for agents
 ];
 
 fn ok(id: Value, result: Value) -> Value {
@@ -48,8 +57,20 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Value {
 }
 
 impl Server {
+    fn offers(&self, t: &Tool) -> bool {
+        !t.write || self.writes || self.propose.is_some()
+    }
+
     pub fn tools(&self) -> Vec<Value> {
-        TOOLS.iter().filter(|t| self.writes || !t.write).map(|t| json!({"name": t.name, "description": t.description, "inputSchema": (t.schema)(), "annotations": {"readOnlyHint": !t.write, "destructiveHint": false}})).collect()
+        let proposing = self.propose.is_some() && !self.writes;
+        TOOLS
+            .iter()
+            .filter(|t| self.offers(t))
+            .map(|t| {
+                let description = if t.write && proposing { format!("{}{PROPOSE_NOTE}", t.description) } else { t.description.to_string() };
+                json!({"name": t.name, "description": description, "inputSchema": (t.schema)(), "annotations": {"readOnlyHint": !t.write, "destructiveHint": false}})
+            })
+            .collect()
     }
 
     pub fn handle(&mut self, msg: &Value) -> Option<Value> {
@@ -70,7 +91,7 @@ impl Server {
             "tools/call" => {
                 let name = params.get("name").and_then(Value::as_str).unwrap_or("");
                 let args = params.get("arguments").cloned().unwrap_or(json!({}));
-                if !TOOLS.iter().any(|t| t.name == name && (self.writes || !t.write)) {
+                if !TOOLS.iter().any(|t| t.name == name && self.offers(t)) {
                     return Some(rpc_error(id, -32602, &format!("unknown tool {name:?}"))); // i18n-ok: protocol
                 }
                 match self.call(name, &args) {
@@ -88,7 +109,53 @@ impl Server {
         let str_arg = |k: &str| a.get(k).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
         let items = s.items().map_err(|e| e.to_string())?;
         let list = |v: Vec<&Item>| json!({"count": v.len(), "items": v.iter().map(|i| crate::item_json(i, today)).collect::<Vec<_>>()});
+        let order = date::order_for(i18n::locale());
+        if !self.writes
+            && let Some(dir) = &self.propose
+            && vigia_core::agent::WRITE_TOOLS.contains(&name)
+        {
+            let preview = match name {
+                "add_item" => crate::item_json(&vigia_core::agent::item_from_args(a, today, order)?, today),
+                _ => {
+                    let it = s.item(vigia_core::agent::needs_id(a)?).map_err(|e| e.to_string())?;
+                    let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
+                    json!({"item": crate::item_json(&it, today), "new_expiry": date::iso(r.expires), "cost": r.cost, "note": r.note})
+                }
+            };
+            let p = vigia_core::agent::Proposal { tool: name.to_string(), args: a.clone(), reason: str_arg("reason").unwrap_or_default().to_string() };
+            vigia_core::agent::deliver(dir, &p).map_err(|e| e.to_string())?;
+            return Ok(json!({"status": "awaiting_approval", "preview": preview, "message": "Shown to the user as a card in Vigía; it is saved only if they accept it."})); // i18n-ok: for agents
+        }
         match name {
+            "summary" => {
+                let c = view::counts(&items, today);
+                let failing: Vec<Value> = items.iter().filter(|i| i.auto_check && check_failed(i)).map(|i| crate::item_json(i, today)).collect();
+                Ok(json!({"today": date::iso(today), "expired": c.expired, "soon": c.soon, "upcoming": c.upcoming, "ok": c.ok, "undated": c.undated, "in_progress": c.in_progress, "total": c.total, "next": view::next(&items, today, 8).iter().map(|i| crate::item_json(i, today)).collect::<Vec<_>>(), "failing_checks": failing}))
+            }
+            "checks" => {
+                let only = a.get("failing_only").and_then(Value::as_bool).unwrap_or(false);
+                let v: Vec<Value> = view::sorted(items.iter().filter(|i| matches!(i.kind, Kind::Domain | Kind::Certificate) || !i.host.is_empty()), today)
+                    .into_iter()
+                    .filter(|i| !only || check_failed(i))
+                    .map(|i| {
+                        let mut j = crate::item_json(i, today);
+                        j["last_checked_at"] = json!(i.last_checked.and_then(|t| chrono::DateTime::from_timestamp(t, 0)).map(|t| t.to_rfc3339()));
+                        j["check_failed"] = json!(check_failed(i));
+                        j
+                    })
+                    .collect();
+                Ok(json!({"count": v.len(), "items": v}))
+            }
+            "entity" => {
+                let entities = s.entities().map_err(|e| e.to_string())?;
+                let o = str_arg("owner").ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
+                let e = o.parse::<i64>().ok().and_then(|id| entities.iter().find(|e| e.id == id)).or_else(|| vigia_core::entity::find(&entities, o)).ok_or_else(|| format!("no entity {o:?}; see the entities tool"))?; // i18n-ok: for agents
+                let mut v = crate::entity_json(e, &items);
+                v["items"] = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today).iter().map(|i| crate::item_json(i, today)).collect();
+                let name_of = |id: i64| entities.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
+                v["relations"] = s.relations().map_err(|e| e.to_string())?.iter().filter(|r| r.from == e.id || r.to == e.id).map(|r| json!({"from": r.from, "from_name": name_of(r.from), "to": r.to, "to_name": name_of(r.to), "role": r.role.id()})).collect();
+                Ok(v)
+            }
             "list_items" => {
                 let entities = s.entities().map_err(|e| e.to_string())?;
                 let f = Filter {
@@ -120,48 +187,16 @@ impl Server {
                 Ok(v)
             }
             "add_item" => {
-                let order = date::order_for(i18n::locale());
-                let mut it = match (str_arg("text"), str_arg("kind")) {
-                    (Some(t), _) => vigia_core::quick::parse(t, today, order),
-                    (None, Some(k)) => Item::new(Kind::from_id(k).ok_or_else(|| i18n::t!("cli.err.bad_kind", value = k))?, ""),
-                    (None, None) if str_arg("name").is_some() => Item::new(Kind::Custom, ""),
-                    _ => return Err(i18n::t!("cli.err.add_usage")),
-                };
-                if let (Some(k), Some(_)) = (str_arg("kind"), str_arg("text")) {
-                    it.kind = Kind::from_id(k).ok_or_else(|| i18n::t!("cli.err.bad_kind", value = k))?;
-                }
-                if let Some(v) = str_arg("name") {
-                    it.name = v.into();
-                }
-                if let Some(v) = str_arg("owner") {
-                    it.owner = v.into();
-                    it.entity = None;
-                }
-                if let Some(v) = str_arg("expires") {
-                    it.expires = Some(date::parse_loose(v, today, order).ok_or_else(|| i18n::t!("cli.err.bad_date", value = v))?);
-                }
-                if let Some(v) = str_arg("host") {
-                    it.host = v.into();
-                }
-                if let Some(v) = str_arg("notes") {
-                    it.notes = v.into();
-                }
-                if it.name.trim().is_empty() {
-                    it.name = it.kind.label();
-                }
+                let it = vigia_core::agent::item_from_args(a, today, order)?;
                 let id = s.insert(&it).map_err(|e| e.to_string())?;
                 self.republish(&s);
                 Ok(crate::item_json(&s.item(id).map_err(|e| e.to_string())?, today))
             }
             "renew_item" => {
-                let id = a.get("id").and_then(Value::as_i64).ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
                 let mut s = s;
-                let it = s.item(id).map_err(|e| e.to_string())?;
-                let new = match str_arg("expires") {
-                    Some(v) => date::parse_loose(v, today, date::order_for(i18n::locale())).ok_or_else(|| i18n::t!("cli.err.bad_date", value = v))?,
-                    None => it.suggest_next(today),
-                };
-                let it = s.renew(id, new, today, a.get("cost").and_then(Value::as_f64), str_arg("note").unwrap_or_default()).map_err(|e| e.to_string())?;
+                let it = s.item(vigia_core::agent::needs_id(a)?).map_err(|e| e.to_string())?;
+                let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
+                let it = s.renew(r.id, r.expires, today, r.cost, &r.note).map_err(|e| e.to_string())?;
                 self.republish(&s);
                 Ok(crate::item_json(&it, today))
             }
@@ -198,6 +233,11 @@ impl Server {
     }
 }
 
+/// The last automatic check ended in an error (RDAP / TLS failed or the host didn't answer).
+fn check_failed(i: &Item) -> bool {
+    i.last_checked.is_some() && vigia_core::checks::note_is_failure(&i.check_note)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,7 +262,7 @@ mod tests {
     #[test]
     fn read_only_by_default() {
         let (_d, p) = db();
-        let mut srv = Server { db: p, writes: false, publish: false };
+        let mut srv = Server { db: p, writes: false, publish: false, propose: None };
         let r = run(
             &mut srv,
             &[
@@ -240,7 +280,7 @@ mod tests {
         assert_eq!(r.len(), 8, "the notification gets no answer");
         assert_eq!(r[0]["result"]["protocolVersion"], "2025-06-18");
         let names: Vec<&str> = r[1]["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, vec!["list_items", "due", "entities", "item"]);
+        assert_eq!(names, vec!["summary", "checks", "entity", "list_items", "due", "entities", "item"]);
         assert!(r[1]["result"]["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
         assert_eq!(r[2]["result"]["structuredContent"]["count"], 1);
         assert_eq!(r[3]["result"]["structuredContent"]["items"][0]["kind"], "soat");
@@ -253,7 +293,7 @@ mod tests {
     #[test]
     fn writes_only_with_the_flag() {
         let (_d, p) = db();
-        let mut srv = Server { db: p.clone(), writes: true, publish: false };
+        let mut srv = Server { db: p.clone(), writes: true, publish: false, propose: None };
         let list = srv.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).unwrap();
         let tools = list["result"]["tools"].as_array().unwrap();
         assert_eq!(tools.len(), TOOLS.len());
@@ -264,5 +304,50 @@ mod tests {
         assert_eq!(r["result"]["structuredContent"]["expires"], "2030-01-01");
         let s = Store::open(&p).unwrap();
         assert_eq!((s.items().unwrap().len(), s.renewals(1).unwrap().len()), (3, 1));
+    }
+
+    #[test]
+    fn propose_mode_leaves_cards_and_never_writes() {
+        let (d, p) = db();
+        let dir = d.path().join("proposals");
+        let mut srv = Server { db: p.clone(), writes: false, publish: false, propose: Some(dir.clone()) };
+        let list = srv.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).unwrap();
+        let add = list["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "add_item").expect("offered as a proposal");
+        assert!(add["description"].as_str().unwrap().contains("proposal"));
+        let call = |srv: &mut Server, name: &str, args: Value| srv.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap();
+        let r = call(&mut srv, "add_item", json!({"kind": "certificate", "name": "TLS example.org", "expires": "2027-01-15", "host": "example.org", "reason": "found in the mail"}));
+        assert_eq!(r["result"]["structuredContent"]["status"], "awaiting_approval");
+        assert_eq!(r["result"]["structuredContent"]["preview"]["kind"], "certificate");
+        let r = call(&mut srv, "renew_item", json!({"id": 1, "expires": "2030-01-01"}));
+        assert_eq!(r["result"]["structuredContent"]["preview"]["new_expiry"], "2030-01-01");
+        assert_eq!(call(&mut srv, "renew_item", json!({"id": 99}))["result"]["isError"], true);
+        assert_eq!(call(&mut srv, "add_item", json!({"kind": "nope"}))["result"]["isError"], true);
+        let s = Store::open(&p).unwrap();
+        assert_eq!((s.items().unwrap().len(), s.renewals(1).unwrap().len()), (2, 0), "nothing written");
+        let got = vigia_core::agent::collect(&dir);
+        assert_eq!(got.iter().map(|p| p.tool.as_str()).collect::<Vec<_>>(), ["add_item", "renew_item"]);
+        assert_eq!(got[0].reason, "found in the mail");
+    }
+
+    #[test]
+    fn summary_checks_and_entity() {
+        let (_d, p) = db();
+        let s = Store::open(&p).unwrap();
+        let mut dom = s.item(2).unwrap();
+        dom.host = "example.org".into();
+        dom.auto_check = true;
+        vigia_core::checks::apply(&mut dom, &vigia_core::checks::Outcome::Failed("timeout".into()), 1_700_000_000);
+        s.update(&dom).unwrap();
+        let mut srv = Server { db: p, writes: false, publish: false, propose: None };
+        let call = |srv: &mut Server, name: &str, args: Value| srv.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()["result"]["structuredContent"].clone();
+        let sum = call(&mut srv, "summary", json!({}));
+        assert_eq!(sum["soon"], 1);
+        assert_eq!(sum["failing_checks"][0]["id"], 2);
+        let checks = call(&mut srv, "checks", json!({"failing_only": true}));
+        assert_eq!(checks["count"], 1);
+        assert_eq!(checks["items"][0]["check_failed"], true);
+        assert!(checks["items"][0]["last_checked_at"].as_str().is_some());
+        let e = call(&mut srv, "entity", json!({"owner": "ABC123"}));
+        assert_eq!(e["items"][0]["kind"], "soat");
     }
 }

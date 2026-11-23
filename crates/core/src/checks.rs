@@ -92,6 +92,15 @@ pub fn apply(item: &mut Item, outcome: &Outcome, now: i64) -> bool {
     item.expires != before
 }
 
+/// Whether `note` is a failed check's note, in whichever bundled language it was written.
+pub fn note_is_failure(note: &str) -> bool {
+    i18n::available().iter().any(|(lang, _)| {
+        let t = i18n::tr_in(lang, "core.check.failed");
+        let prefix = t.split("{detail}").next().unwrap_or_default().trim();
+        !prefix.is_empty() && note.trim_start().starts_with(prefix)
+    })
+}
+
 /// Whether the last check is old enough to call stale in the UI (two missed days).
 pub fn stale(item: &Item, now: i64) -> bool {
     item.auto_check && item.last_checked.is_none_or(|t| now - t > 2 * EVERY_SECS)
@@ -142,5 +151,14 @@ mod tests {
         let items = vec![Item { id: 1, last_checked: Some(now - 10), ..d.clone() }, Item { id: 2, last_checked: Some(now - EVERY_SECS), ..d.clone() }, Item { id: 3, last_checked: None, ..d.clone() }, Item { id: 4, auto_check: false, ..d.clone() }, Item { id: 5, auto_check: true, ..Item::new(Kind::Passport, "p") }];
         assert_eq!(due(&items, now), vec![2, 3]);
         assert!(stale(&Item { last_checked: Some(now - 3 * EVERY_SECS), ..d.clone() }, now));
+    }
+
+    #[test]
+    fn failed_notes_are_recognized_in_any_language() {
+        let mut it = Item::new(crate::model::Kind::Domain, "example.org");
+        apply(&mut it, &Outcome::Failed("timeout".into()), 1);
+        assert!(note_is_failure(&it.check_note));
+        assert!(note_is_failure("Check failed: dns") && note_is_failure("Falló la revisión: x"));
+        assert!(!note_is_failure("") && !note_is_failure(&i18n::t!("core.check.domain_ok", date = "2027-01-01")));
     }
 }
