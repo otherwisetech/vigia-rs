@@ -66,6 +66,13 @@ pub fn match_system(tag: &str) -> Option<&'static str> {
     CATALOG.iter().map(|(c, _)| *c).find(|c| *c == base)
 }
 
+/// `key` in `lang` (no arguments), else the default language, else the key; the current
+/// language doesn't change. For texts other programs show in the user's language (manifests).
+pub fn tr_in(lang: &str, key: &str) -> String {
+    let t = tables();
+    t.get(lang).and_then(|m| m.get(key)).or_else(|| t.get(DEFAULT).and_then(|m| m.get(key))).copied().unwrap_or(key).to_string()
+}
+
 fn raw(key: &str) -> Option<&'static str> {
     let t = tables();
     t.get(locale()).and_then(|m| m.get(key)).or_else(|| t.get(DEFAULT).and_then(|m| m.get(key))).copied()

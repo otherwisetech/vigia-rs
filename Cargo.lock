@@ -4737,8 +4737,8 @@ dependencies = [
 
 [[package]]
 name = "otherwise-link"
-version = "0.3.0"
-source = "git+https://github.com/otherwisetech/otherwise-link?tag=v0.3.0#5e027f3106cd0eea088538bbc9146def6661d8f5"
+version = "0.5.0"
+source = "git+https://github.com/otherwisetech/otherwise-link?tag=v0.5.0#a1a0d1cf9699f6f42479de70915b838c5c88324c"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -7669,7 +7669,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigia-app"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7689,7 +7689,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-cli"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "otherwise-link",
@@ -7701,7 +7701,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-core"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "image",
@@ -7722,7 +7722,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-i18n"
-version = "0.3.0"
+version = "0.4.0"
 
 [[package]]
 name = "vswhom"
