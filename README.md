@@ -195,16 +195,16 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
 The **Asistente** button (or ⌘J) docks the shared Otherwise AI panel
 ([otherwise-agent-panel](https://github.com/otherwisetech/otherwise-agent-panel)) next to every
 view, as a bar, at the bottom, on the right or full window, in Chat or Terminal mode. It runs
-**your own** Claude Code, Codex or opencode with `vigia mcp` on the open database for that
-session only; your agent's configuration is never changed. Try *¿Qué está vencido y desde
+**your own** Claude Code, Codex or opencode, or a model of your own **Ollama** on this computer,
+with `vigia mcp` on the open database for that session only; your agent's configuration is never changed. Try *¿Qué está vencido y desde
 cuándo?*, *¿Qué certificados y dominios vencen pronto?*, *Resume lo que vence este mes* or
 *¿Qué revisiones automáticas están fallando?*.
 
 It reads items, deadlines, renewal history, domain / certificate check results and owners. In
 *Preguntar antes de cambiar* or *Automático* it may propose adding an item or recording a
 renewal: each proposal is a card, saved only when you press *Aplicar*. What you ask and what
-the assistant reads goes to the provider you picked, with your own account; the panel says so
-under the input.
+the assistant reads goes to the provider you picked, with your own account (with Ollama it stays
+on this computer); the panel says so under the input.
 
 ## Privacy
 
