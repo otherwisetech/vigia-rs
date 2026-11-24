@@ -38,6 +38,33 @@ engine, for scripts and AI agents.
   deadlines, renewal history, files and **links** to other entities (Juan → owner of Otherwise
   SAS, member of Otherwise Technologies LLC, owner of the Mazda), and can keep a **live .ics
   file** of just its deadlines.
+- **One or more owners.** An item can belong to several people and / or companies (a car two
+  people own, a domain a company holds with its founder): the form's *Belongs to* takes the main
+  owner and *Another owner* adds more. Entities own entities too, as *owner* links (people own a
+  company, a company owns a car). An owner's page, the list filter and the sidebar counts include
+  what it owns directly and, marked *via Otherwise SAS*, what it owns through what it owns. The
+  Map draws an edge from every owner. Entities can be **archived** (a sold car): out of the
+  sidebar, sections, pickers and the Map; their items and links stay. See
+  [docs/ownership.md](docs/ownership.md).
+- **Sections show what belongs in them.** Each section lists its entities as cards *and* the
+  items whose category belongs to it that no entity of that kind holds: *Digital* shows the
+  domains, certificates and subscriptions people and companies hold (a company's `vcity.io`),
+  besides any digital entity (an account, a website); *Vehicles* the papers of a car nobody
+  filed as a vehicle; *Companies* filings; *Home* home items. An item's category and the
+  section it shows in always agree. A new domain's or subscription's owner is a person or a
+  company (guessed from the name typed), never a "digital" owner.
+- **Forms by type.** Each type asks for its own fields with its own words, from data in
+  `vigia_core::fields` (like the templates): a **birthday** asks the date of birth (the year is
+  optional) and shows the age it turns, with no cost, provider or renewal; a **domain** its
+  name, expiry, registrar, cost, auto-renew and the automatic check; a passport its dates and
+  number; a warranty its purchase date and months. A field the type doesn't ask for still shows
+  when the item already has a value there. Dates are typed in the language's order
+  (`DD/MM/AAAA`, `MM/DD/YYYY`), or relative (*en 3 meses*).
+- **Birthdays and anniversaries** are types of their own (cake and rings icons), the default of
+  the *Cumpleaños* suggestion: they come back every year on their day, and the calendar,
+  reminders and the Today view say *Juan José cumple 36 años* when the year is known. A free-form
+  item named like one (*Cumpleaños de Ana*) shows a one-click *Convert*; nothing is rewritten
+  without asking.
 - **Sections by kind, with one-click reminders.** The sidebar always shows *Vehículos*,
   *Mascotas*, *Personas*, *Empresas*, *Hogar* and *Digital* (plus *Otros* when used). A section
   lists its entities as cards — the next deadline, its status (overdue, soon, OK) and the
@@ -65,10 +92,14 @@ engine, for scripts and AI agents.
   **mark renewed** (asks the new expiry, suggests one from the recurrence, keeps the history), and
   a **renewal in progress** state that pauses the early reminders. A first run, or a week away,
   never produces a burst of stale reminders: only the most recent one fires.
-- **Automatic checks**, opt-in per item and the only network Vigía uses for your data: a
-  domain's expiry over **RDAP** (`rdap.org`, falling back to the IANA bootstrap file) and a
-  certificate's `notAfter` from a **TLS handshake** with the host (expired and self-signed
-  certificates are read too). Daily while the app runs, with *last checked* shown.
+- **Automatic checks**, on by default for domains and certificates (off per item) and the only
+  network Vigía uses for your data: a domain's expiry over public **RDAP** (`rdap.org`, falling
+  back to the IANA bootstrap file; only the domain name is sent) and a certificate's `notAfter`
+  from a **TLS handshake** with the host (expired and self-signed certificates are read too).
+  They run when an item is added or its domain changes, on *Check now*, and daily while the app
+  runs, shown as *RDAP · checked today*. A domain named like one (`vcity.io`) checks that name.
+  A registry RDAP can't ask (some country domains) or that doesn't publish the expiry shows
+  *couldn't check: enter the date by hand*. 0.7.0 looks up once the domains that had no date.
 - **Views**: a **dashboard** (counts by urgency, the next 5, the reminders coming in the next 30
   days, what was sent, the automatic checks), a **timeline** of the next 12 months grouped by
   month and coloured by urgency, a **calendar** month view, and a **list** with filters by
@@ -162,13 +193,24 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
   | `otherwise://vigia/item/<id>` | an item |
   | `otherwise://vigia/owner/<id>` | an entity's page (Vigía's id) |
   | `otherwise://vigia/entity/<uuid>` | the entity linked to a shared card |
+  | `otherwise://vigia/section/<kind>` | a section page (`digital`, `vehicle`, `pet`, `person`, `company`, `property`) |
   | `otherwise://vigia/new?kind=certificate&name=…&owner=…&expires=YYYY-MM-DD&host=…` | the new-item form, prefilled (also `text` = a quick-add line, `owner_kind`, `entity`, `issued`, `months`, `provider`, `reference`, `url`, `notes`, `tags`, `check=1`); nothing is saved until you do |
 
 - **Calendar.** Every live item's deadline (expiry, or a contract's notice deadline) and its
   next reminder day, from 60 days back to 18 months ahead, go to `<data folder>/vigia/events.json`
   for Otherwise Apps' Calendar (otherwise-link SPEC §9), each linking to `otherwise://vigia/item/<id>`;
   health items are private there ("Busy" in exports and for assistants). The same Settings switch
-  as Today turns it off.
+  as Today turns it off. Event kinds (`kind`):
+
+  | kind | event | title |
+  |------|-------|-------|
+  | `due` | the expiry or filing deadline itself (id `item-<id>`) | *SOAT vence · Mercedes CQC925* |
+  | `renewal` | the same, for something that repeats or renews | *Dominio se renueva · Otherwise SAS* |
+  | `warranty` | a warranty's end | *Garantía vence · Ana* |
+  | `birthday`, `anniversary` | the day itself | *Cumpleaños de Juan José (36 años)* |
+  | `reminder` | the next lead reminder before it (id `item-<id>-reminder`); a calendar may hide these, Vigía notifies on its own | *Recordatorio: …* |
+
+  Fields are only ever added to this file, never removed.
 - **Today.** What is overdue or due in the next 30 days goes to `today/vigia.json`, which
   Otherwise Apps shows in its Today view, each with a link to the item. Rewritten when it
   changes; Settings → *Show what’s due in Today and Calendar* turns it off (and removes the file).
@@ -183,10 +225,24 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
 - **MCP.** `vigia mcp` is a stdio MCP server, read-only: `summary`, `checks`, `entity`,
   `list_items`, `due`, `entities`, `item`, `entities_by_kind` (the sections: each owner's next
   deadline, status and missing suggestions) and `templates`. With `--allow-writes` (which
-  Otherwise Apps' hub passes only when you allow write tools) it adds `add_item`, `renew_item`
-  and `propose_add_from_template` (*recuérdame el SOAT del carro*); with `--propose <folder>`
-  (the app's assistant) those only leave a proposal for the app. People's document numbers
-  (and identity documents' reference numbers) reach it masked to their last 4 characters.
+  Otherwise Apps' hub passes only when you allow write tools) it adds the write tools; with
+  `--propose <folder>` (the app's assistant) they only leave a proposal for the app. Every
+  write the app's screens can make has one:
+
+  | Tool | Does |
+  |------|------|
+  | `add_item`, `propose_add_from_template` | add an item (quick-add line, fields, or a template) |
+  | `renew_item` | record a renewal |
+  | `update_items` | change one or many items: owners (set / add / remove), dates, repeat rule, reminder days, cost, provider, reference, renewal link, tags, auto-renew, notes, domain, auto-check, state (archive, in progress), snooze, business days |
+  | `delete_items` | delete items (prefer archiving) |
+  | `convert_celebrations` | make items yearly birthdays or anniversaries |
+  | `check_items` | run the RDAP / TLS check now |
+  | `create_entity`, `update_entity`, `archive_entity`, `delete_entity`, `merge_entities` | people, companies, vehicles, pets, homes, digital assets, and who owns them |
+  | `relate`, `unrelate` | links between entities (owner, member, family…) |
+
+  Not offered: attaching files and reading documents (they come from your disk), calendars and
+  holidays, settings and where the database lives. People's document numbers (and identity
+  documents' reference numbers) reach it masked to their last 4 characters.
 
   ```bash
   claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Apps' hub
@@ -203,14 +259,17 @@ cuándo?*, *¿Qué certificados y dominios vencen pronto?*, *Resume lo que vence
 *¿Qué revisiones automáticas están fallando?*.
 
 It reads items, deadlines, renewal history, domain / certificate check results and owners. In
-*Preguntar antes de cambiar* or *Automático* it may propose adding an item or recording a
-renewal: each proposal is a card, saved only when you press *Aplicar*. What you ask and what
+*Preguntar antes de cambiar* or *Automático* it may propose changes with the write tools above
+(*crea la empresa Otherwise SAS y pásale estos dominios*): each proposal is a card, saved only
+when you press *Aplicar*, and the confirmation offers **Undo** (deleting and merging can't be
+undone, and their cards say so). What you ask and what
 the assistant reads goes to the provider you picked, with your own account (with Ollama it stays
 on this computer); the panel says so under the input.
 
 ## Privacy
 
-Nothing leaves your computer except: the opt-in RDAP / TLS checks of the items you mark, the
+Nothing leaves your computer except: the RDAP / TLS checks of domains and certificates (the
+name or host only; off per item), the
 one-time OCR model download when you ask for it, and an unauthenticated, once-a-day request for
 this repository's GitHub star count (Settings → *Show GitHub stars* turns it off).
 

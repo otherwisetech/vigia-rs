@@ -17,12 +17,14 @@ pub enum Category {
     Membership,
     Health,
     Home,
+    /// Birthdays and anniversaries.
+    Celebration,
     #[default]
     Other,
 }
 
 impl Category {
-    pub const ALL: [Category; 11] = [Category::Identity, Category::Vehicle, Category::Insurance, Category::Warranty, Category::Digital, Category::Contract, Category::Company, Category::Membership, Category::Health, Category::Home, Category::Other];
+    pub const ALL: [Category; 12] = [Category::Identity, Category::Vehicle, Category::Insurance, Category::Warranty, Category::Digital, Category::Contract, Category::Company, Category::Membership, Category::Health, Category::Home, Category::Celebration, Category::Other];
 
     pub fn id(self) -> &'static str {
         match self {
@@ -36,6 +38,7 @@ impl Category {
             Category::Membership => "membership",
             Category::Health => "health",
             Category::Home => "home",
+            Category::Celebration => "celebration",
             Category::Other => "other",
         }
     }
@@ -56,7 +59,23 @@ impl Category {
             Category::Membership => i18n::t!("core.cat.membership"),
             Category::Health => i18n::t!("core.cat.health"),
             Category::Home => i18n::t!("core.cat.home"),
+            Category::Celebration => i18n::t!("core.cat.celebration"),
             Category::Other => i18n::t!("core.cat.other"),
+        }
+    }
+
+    /// The sidebar section an item of this category shows in, whoever owns it: a domain is in
+    /// Digital whether a person or a company holds it. Categories without one (insurance,
+    /// contracts…) show only under their owners.
+    pub fn section(self) -> Option<crate::entity::EntityKind> {
+        use crate::entity::EntityKind as E;
+        match self {
+            Category::Vehicle => Some(E::Vehicle),
+            Category::Company => Some(E::Company),
+            Category::Home => Some(E::Property),
+            Category::Digital => Some(E::Digital),
+            Category::Identity | Category::Celebration => Some(E::Person),
+            _ => None,
         }
     }
 }
@@ -88,12 +107,14 @@ pub enum Kind {
     Checkup,
     GasInspection,
     Extinguisher,
+    Birthday,
+    Anniversary,
     #[default]
     Custom,
 }
 
 impl Kind {
-    pub const ALL: [Kind; 24] = [
+    pub const ALL: [Kind; 26] = [
         Kind::Passport,
         Kind::NationalId,
         Kind::DriverLicense,
@@ -117,6 +138,8 @@ impl Kind {
         Kind::Checkup,
         Kind::GasInspection,
         Kind::Extinguisher,
+        Kind::Birthday,
+        Kind::Anniversary,
         Kind::Custom,
     ];
 
@@ -145,6 +168,8 @@ impl Kind {
             Kind::Checkup => "checkup",
             Kind::GasInspection => "gas_inspection",
             Kind::Extinguisher => "extinguisher",
+            Kind::Birthday => "birthday",
+            Kind::Anniversary => "anniversary",
             Kind::Custom => "custom",
         }
     }
@@ -178,6 +203,8 @@ impl Kind {
             Kind::Checkup => i18n::t!("core.kind.checkup"),
             Kind::GasInspection => i18n::t!("core.kind.gas_inspection"),
             Kind::Extinguisher => i18n::t!("core.kind.extinguisher"),
+            Kind::Birthday => i18n::t!("core.kind.birthday"),
+            Kind::Anniversary => i18n::t!("core.kind.anniversary"),
             Kind::Custom => i18n::t!("core.kind.custom"),
         }
     }
@@ -195,6 +222,7 @@ impl Kind {
             Membership => Category::Membership,
             Vaccine | Checkup => Category::Health,
             GasInspection | Extinguisher => Category::Home,
+            Birthday | Anniversary => Category::Celebration,
             Custom => Category::Other,
         }
     }
@@ -211,6 +239,7 @@ impl Kind {
             VehicleRegistration | Membership | Checkup | Extinguisher | Warranty | Vaccine | Rut => vec![30, 7],
             InsurancePolicy | WyomingReport | CamaraComercio | GasInspection => vec![60, 30, 7],
             Domain => vec![60, 30, 7, 1],
+            Birthday | Anniversary => vec![7, 1],
             Certificate => vec![30, 14, 7, 1],
             Contract | Custom => DEFAULT_LEAD.to_vec(),
         }
@@ -248,6 +277,28 @@ impl Kind {
     /// Whether this type can be checked automatically over the network.
     pub fn checkable(self) -> bool {
         matches!(self, Kind::Domain | Kind::Certificate)
+    }
+
+    /// Birthdays and anniversaries: one date that comes back every year on the same day.
+    pub fn is_celebration(self) -> bool {
+        matches!(self, Kind::Birthday | Kind::Anniversary)
+    }
+
+    /// The celebration a free-form item's name says it is ("Cumpleaños de Ana", "Wedding
+    /// anniversary"), in any bundled language; for suggesting a conversion, never applied
+    /// silently.
+    pub fn celebration_in(name: &str) -> Option<Kind> {
+        let n = name.to_lowercase();
+        let has = |ws: &[&str]| ws.iter().any(|w| n.contains(w));
+        // "aniversário" is a birthday in Portuguese and "anniversaire" in French, unless a
+        // wedding says otherwise; "aniversario" is an anniversary in Spanish
+        if has(&["anniversary", "aniversario", "casamento", "mariage", "boda", "wedding", "matrimonio"]) { // i18n-ok: keywords
+            Some(Kind::Anniversary)
+        } else if has(&["cumpleaños", "cumpleanos", "cumple ", "birthday", "bday", "anniversaire", "aniversário"]) || n.trim() == "cumple" { // i18n-ok: keywords
+            Some(Kind::Birthday)
+        } else {
+            None
+        }
     }
 }
 
@@ -463,6 +514,9 @@ pub struct Item {
     pub entity: Option<crate::entity::EntityId>,
     /// The entity's kind as loaded; on save, the kind for a new entity when `entity` is `None`.
     pub owner_kind: Option<crate::entity::EntityKind>,
+    /// More owners besides `entity` (a car two people own, a domain a company and its founder
+    /// hold), in order, never repeating `entity`.
+    pub co_owners: Vec<crate::entity::EntityId>,
     /// A due date on a weekend / holiday moves to the business day before or after.
     pub business_days: Option<crate::holidays::BusinessDays>,
     pub category: Category,
@@ -500,7 +554,94 @@ pub struct Item {
 impl Item {
     /// A new item with the type's defaults.
     pub fn new(kind: Kind, name: impl Into<String>) -> Item {
-        Item { kind, name: name.into(), category: kind.category(), recurrence: kind.recurrence(), lead_days: kind.lead_days(), business_days: kind.business_days(), term_months: if kind == Kind::Warranty { Some(12) } else { None }, ..Default::default() }
+        Item { kind, name: name.into(), category: kind.category(), recurrence: kind.recurrence(), lead_days: kind.lead_days(), business_days: kind.business_days(), term_months: if kind == Kind::Warranty { Some(12) } else { None }, auto_check: kind.checkable(), ..Default::default() }
+    }
+
+    /// Every owner: the main one first, then the others.
+    pub fn owner_ids(&self) -> Vec<crate::entity::EntityId> {
+        let mut v: Vec<crate::entity::EntityId> = self.entity.into_iter().collect();
+        for id in &self.co_owners {
+            if !v.contains(id) {
+                v.push(*id);
+            }
+        }
+        v
+    }
+
+    /// Whether `e` is one of its owners (directly).
+    pub fn owned_by(&self, e: crate::entity::EntityId) -> bool {
+        self.entity == Some(e) || self.co_owners.contains(&e)
+    }
+
+    /// A celebration's day and month, from its rule or its date.
+    pub fn celebration_day(&self) -> Option<(u32, u32)> {
+        use chrono::Datelike;
+        match self.recurrence {
+            Recurrence::Yearly { month, day } => Some((month, day)),
+            _ => self.issued.or(self.expires).map(|d| (d.month(), d.day())),
+        }
+    }
+
+    /// The years a birthday turns (or an anniversary counts) on `on`, when the year it began is
+    /// known (`issued`).
+    pub fn years_on(&self, on: Date) -> Option<i32> {
+        use chrono::Datelike;
+        let start = self.issued.filter(|_| self.kind.is_celebration())?;
+        let n = on.year() - start.year();
+        (n > 0).then_some(n)
+    }
+
+    /// "Ana cumple 30 años" / "Bodas: 10 años" on the celebration falling on `on`; `None` for
+    /// other items or an unknown year.
+    pub fn celebration_text(&self, on: Date) -> Option<String> {
+        let n = self.years_on(on)?;
+        let who = if self.owner.is_empty() { self.name.clone() } else { self.owner.clone() };
+        Some(match self.kind {
+            Kind::Birthday => i18n::tn!("core.birthday.turns", n, name = who),
+            _ => i18n::tn!("core.anniversary.years", n, name = self.name.clone()),
+        })
+    }
+
+    /// Makes a birthday or anniversary consistent: it comes back every year on its day (no
+    /// stored expiry; the rule gives the next one) and the year it began, when known, stays in
+    /// `issued`. A date in the past is taken as that year; one this year or later only gives the
+    /// day. Other kinds are left alone.
+    pub fn normalize_celebration(&mut self, today: Date) {
+        use chrono::Datelike;
+        if !self.kind.is_celebration() {
+            return;
+        }
+        let Some((month, day)) = self.celebration_day() else { return };
+        if self.issued.is_none()
+            && let Some(e) = self.expires
+            && e.year() < today.year()
+        {
+            self.issued = Some(e);
+        }
+        if self.issued.is_some_and(|i| i.year() >= today.year()) {
+            self.issued = None;
+        }
+        self.recurrence = Recurrence::Yearly { month, day };
+        self.expires = None;
+        self.term_months = None;
+        self.notice_days = None;
+        self.business_days = None;
+        self.category = Category::Celebration;
+    }
+
+    /// What saving does to any item: a celebration's rule, a domain's name.
+    pub fn tidy(&mut self, today: Date) {
+        self.normalize_celebration(today);
+        self.fill_host();
+    }
+
+    /// A domain whose name is the domain itself (`vcity.io`) checks that name.
+    pub fn fill_host(&mut self) {
+        if self.kind == Kind::Domain && self.host.trim().is_empty()
+            && let Some(d) = crate::rdap::normalize(&self.name).filter(|_| !self.name.trim().contains(char::is_whitespace))
+        {
+            self.host = d;
+        }
     }
 
     /// The end of validity: the stored expiry, else purchase + warranty months, else the next

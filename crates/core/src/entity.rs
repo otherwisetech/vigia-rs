@@ -99,6 +99,9 @@ pub struct Entity {
     /// Id of its card in the shared registry of the Otherwise apps, once synced
     /// ([`crate::sync::DETACHED`] after the card was deleted there).
     pub shared: Option<String>,
+    /// Kept for the record (a sold car, a closed company): out of the sidebar, sections and
+    /// pickers; its items and links stay.
+    pub archived: bool,
 }
 
 impl Entity {
@@ -157,6 +160,27 @@ impl Role {
             Role::Other => i18n::t!("core.role.other"),
         }
     }
+}
+
+/// What `e` owns through ownership links, at any depth (Juan → Otherwise SAS → the company
+/// car), nearest first, without `e` itself; cycles are cut.
+pub fn owned_through(e: EntityId, rels: &[Relation]) -> Vec<EntityId> {
+    let mut out: Vec<EntityId> = Vec::new();
+    let mut frontier = vec![e];
+    while let Some(x) = frontier.pop() {
+        for r in rels.iter().filter(|r| r.from == x && r.role == Role::Owner) {
+            if r.to != e && !out.contains(&r.to) {
+                out.push(r.to);
+                frontier.insert(0, r.to);
+            }
+        }
+    }
+    out
+}
+
+/// Who owns `e` directly (people owning a company, a company owning a car).
+pub fn owners_of(e: EntityId, rels: &[Relation]) -> Vec<EntityId> {
+    rels.iter().filter(|r| r.to == e && r.role == Role::Owner).map(|r| r.from).collect()
 }
 
 /// Uppercase letters and digits only: `abc-123` → `ABC123`.
@@ -224,10 +248,11 @@ impl Kind {
     pub fn entity_kind(self) -> Option<EntityKind> {
         use Kind::*;
         match self {
-            Passport | NationalId | DriverLicense | Visa | ResidencePermit | Checkup => Some(EntityKind::Person),
+            Passport | NationalId | DriverLicense | Visa | ResidencePermit | Checkup | Birthday => Some(EntityKind::Person),
             Soat | Tecnomecanica | VehicleRegistration | VehicleInsurance => Some(EntityKind::Vehicle),
             WyomingReport | CamaraComercio | Rut => Some(EntityKind::Company),
-            Domain | Certificate | Subscription => Some(EntityKind::Digital),
+            // a domain, certificate or subscription is the digital thing itself: whoever holds
+            // it is a person or a company (a name that is a domain is still taken as one)
             GasInspection | Extinguisher => Some(EntityKind::Property),
             _ => None,
         }
@@ -325,6 +350,9 @@ mod tests {
         assert_eq!(guess("Ana", Some(Kind::Passport)), EntityKind::Person);
         assert_eq!(guess("Mazda", Some(Kind::Soat)), EntityKind::Vehicle);
         assert_eq!(guess("Otherwise LLC", Some(Kind::Domain)), EntityKind::Company);
+        // who holds a domain is a person or a company, not a "digital" owner
+        assert_eq!(guess("Juan", Some(Kind::Domain)), EntityKind::Person);
+        assert_eq!(guess("vcity.io", Some(Kind::Domain)), EntityKind::Digital);
         assert_eq!(guess("Casa", None), EntityKind::Person);
         assert_eq!(Kind::Tecnomecanica.entity_kind(), Some(EntityKind::Vehicle));
         assert_eq!(Kind::Rut.entity_kind(), Some(EntityKind::Company));
@@ -353,6 +381,17 @@ mod tests {
         assert_eq!(suggest_kind(&Entity { ident: "x".into(), ..mazda.clone() }, &[&soat]), None, "described by the user");
         assert_eq!(suggest_kind(&Entity { shared: Some("u".into()), ..mazda.clone() }, &[&soat]), None, "shared");
         assert_eq!(suggest_kind(&Entity { kind: EntityKind::Company, ..mazda }, &[&soat]), None);
+    }
+
+    #[test]
+    fn ownership_reaches_through_companies() {
+        let rel = |from, to, role| Relation { id: 0, from, to, role };
+        // Juan (1) and Ana (2) own the company (3), which owns a car (4); Juan uses the moto (5)
+        let rels = vec![rel(1, 3, Role::Owner), rel(2, 3, Role::Owner), rel(3, 4, Role::Owner), rel(1, 5, Role::Uses), rel(4, 1, Role::Owner)];
+        assert_eq!(owned_through(1, &rels), vec![3, 4], "a cycle back to Juan is cut");
+        assert_eq!(owned_through(2, &rels), vec![3, 4, 1]);
+        assert!(owned_through(5, &rels).is_empty());
+        assert_eq!(owners_of(3, &rels), vec![1, 2]);
     }
 
     #[test]

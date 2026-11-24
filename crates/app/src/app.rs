@@ -172,6 +172,8 @@ pub struct VigiaApp {
     pub dialog: Option<Dialog>,
     pub about: bool,
     toast: Option<(String, Instant)>,
+    /// The toast says an assistant card was applied: it offers Undo.
+    pub toast_undo: bool,
     pub logo: Arc<Image>,
     pub focus: FocusHandle,
     pub cal_month: Date,
@@ -238,6 +240,7 @@ impl VigiaApp {
             dialog: migration.map(Dialog::Migrate),
             about: false,
             toast: None,
+            toast_undo: false,
             logo: Arc::new(Image::from_bytes(ImageFormat::Png, crate::ICON_PNG.to_vec())),
             focus,
             cal_month: date::month_start(Data::today()),
@@ -253,10 +256,15 @@ impl VigiaApp {
     // ── small actions ────────────────────────────────────────────────────────────────────────
 
     pub fn toast(&mut self, text: String, cx: &mut Context<Self>) {
+        self.toast_for(text, TOAST_FOR, cx);
+    }
+
+    pub fn toast_for(&mut self, text: String, wait: Duration, cx: &mut Context<Self>) {
         let at = Instant::now();
         self.toast = Some((text, at));
+        self.toast_undo = false;
         cx.spawn(async move |this, cx| {
-            cx.background_executor().timer(TOAST_FOR).await;
+            cx.background_executor().timer(wait).await;
             this.update(cx, |this, cx| {
                 if this.toast.as_ref().is_some_and(|(_, t)| *t == at) {
                     this.toast = None;
@@ -319,6 +327,7 @@ impl VigiaApp {
                     self.toast(i18n::t!("app.link.not_found"), cx);
                 }
             }
+            Route::Section(k) => self.set_view(View::Kind(k), cx),
             Route::Shared(uuid) => match self.data.read(cx).entity_for_shared(uuid) {
                 Some(id) => self.open_entity(id, cx),
                 None => self.toast(i18n::t!("app.link.not_found"), cx),
@@ -731,7 +740,7 @@ impl VigiaApp {
         let today = Data::today();
         let d = self.data.read(cx);
         let counts = vigia_core::view::counts(&d.items, today);
-        let used = vigia_core::view::sections(&d.entities, &d.items);
+        let used = vigia_core::view::sections(&d.entities, &d.items, &d.relations);
         // every section shows, empty ones too (to add the first car or pet); other only when used
         let sections: Vec<_> = vigia_core::templates::SECTIONS.into_iter().chain([vigia_core::entity::EntityKind::Other]).filter_map(|k| {
             let ents = used.iter().find(|(u, _)| *u == k).map(|(_, v)| v.clone()).unwrap_or_default();
@@ -840,6 +849,31 @@ impl VigiaApp {
                 })))
                 .on_click(cx.listener(move |this, _, _, cx| this.set_view(View::Kind(kind), cx)));
             side = side.child(header);
+            // what the section holds that no entity of its kind does (a company's domains)
+            let loose = vigia_core::view::loose(&d.items, &d.entities, kind, today);
+            if !loose.is_empty() {
+                let ring = loose.iter().map(|i| i.status(today)).filter(|s| *s != vigia_core::model::Status::Undated).min().map(|s| t.status(s));
+                let on = v == View::Kind(kind);
+                side = side.child(
+                    div()
+                        .id(("side-loose", kind as usize))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
+                        .h(px(28.))
+                        .px(px(10.))
+                        .rounded(px(7.))
+                        .text_size(px(12.5))
+                        .text_color(t.ink_muted)
+                        .cursor_pointer()
+                        .when(!on, |d| d.hover(move |s| s.bg(hover)))
+                        .child(icon(IconName::Inbox, 13., t.ink_muted))
+                        .child(div().flex_1().min_w_0().truncate().child(crate::kinds::loose_label(kind)))
+                        .children(ring.map(|c| div().size(px(6.)).rounded_full().bg(c)))
+                        .child(div().text_size(px(11.)).child(loose.len().to_string()))
+                        .on_click(cx.listener(move |this, _, _, cx| this.set_view(View::Kind(kind), cx))),
+                );
+            }
             for (e, n) in ents {
                 let id = e.id;
                 let on = v == View::Entity(id);
@@ -1000,9 +1034,12 @@ impl VigiaApp {
             .child(card)
     }
 
-    fn render_toast(&self, t: &Tokens) -> Option<impl IntoElement> {
+    fn render_toast(&self, t: &Tokens, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let (text, _) = self.toast.as_ref()?;
-        Some(div().absolute().bottom(px(36.)).left_0().right_0().flex().justify_center().child(div().max_w(px(720.)).px(px(16.)).py(px(10.)).rounded(px(12.)).bg(t.ink).text_color(t.on_fill()).text_size(px(13.)).child(text.clone())))
+        let undo = (self.toast_undo && self.agent.last.is_some()).then(|| {
+            div().id("toast-undo").text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(t.accent_soft).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.assistant.undo")).on_click(cx.listener(|this, _, _, cx| this.undo_last_proposal(cx)))
+        });
+        Some(div().absolute().bottom(px(36.)).left_0().right_0().flex().justify_center().child(div().flex().items_center().gap(px(14.)).max_w(px(720.)).px(px(16.)).py(px(10.)).rounded(px(12.)).bg(t.ink).text_color(t.on_fill()).text_size(px(13.)).child(text.clone()).children(undo)))
     }
 
     pub fn selected_item(&self, cx: &App) -> Option<Item> {
@@ -1122,7 +1159,7 @@ impl Render for VigiaApp {
             .child(self.render_topbar(&t, cx))
             .child(div().flex_1().min_h_0().child(body))
             .child(self.render_footer(&t, cx))
-            .children(self.render_toast(&t))
+            .children(self.render_toast(&t, cx))
             .children(self.render_dialog(&t, cx))
             .when(self.about, |d| d.child(self.render_about(&t, cx)))
     }

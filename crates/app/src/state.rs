@@ -369,10 +369,39 @@ impl Data {
     }
 
     /// Inserts (id 0) or updates; returns the id.
-    pub fn save(&mut self, item: Item, cx: &mut Context<Self>) -> Result<ItemId, String> {
+    pub fn save(&mut self, mut item: Item, cx: &mut Context<Self>) -> Result<ItemId, String> {
+        item.tidy(Self::today());
+        let before = self.item(item.id).cloned();
         let id = self.write(|s| if item.id == 0 { s.insert(&item) } else { s.update(&item).map(|_| item.id) })?;
         self.changed(cx);
+        // a domain or certificate added, renamed or still without a date is looked up now
+        // a domain or certificate added or edited is looked up now (one still without a date
+        // even when its daily check is off); a save of a check's own result is not
+        let look = item.kind.checkable()
+            && (item.auto_check || item.expires.is_none())
+            && before.as_ref().is_none_or(|b| b.last_checked == item.last_checked && (b.host != item.host || b.kind != item.kind || !b.auto_check && item.auto_check || item.expires.is_none()));
+        if look {
+            self.check(vec![id], cx);
+        }
         Ok(id)
+    }
+
+    /// Applies an accepted proposal; returns how to undo it.
+    pub fn apply_plan(&mut self, plan: &vigia_core::agent::Plan, cx: &mut Context<Self>) -> Result<vigia_core::agent::Applied, String> {
+        let today = Self::today();
+        let done = self.write(|s| vigia_core::agent::apply(s, plan, today))?;
+        self.changed(cx);
+        let look: Vec<ItemId> = done.items.iter().copied().filter(|id| plan.check.contains(id) || self.item(*id).is_some_and(|i| i.auto_check && i.kind.checkable() && i.expires.is_none() && i.last_checked.is_none())).collect();
+        if !look.is_empty() {
+            self.check(look, cx);
+        }
+        Ok(done)
+    }
+
+    pub fn undo(&mut self, steps: &[vigia_core::agent::Undo], cx: &mut Context<Self>) -> Result<(), String> {
+        self.write(|s| vigia_core::agent::undo(s, steps))?;
+        self.changed(cx);
+        Ok(())
     }
 
     pub fn delete(&mut self, id: ItemId, cx: &mut Context<Self>) {
@@ -574,7 +603,18 @@ impl Data {
         if !Settings::load().auto_checks() {
             return;
         }
-        let ids = vigia_core::checks::due(&self.items, db::now_secs());
+        let mut ids = vigia_core::checks::due(&self.items, db::now_secs());
+        // 0.7.0: domains added without a date (or by the assistant, before checks were on by
+        // default) are looked up once
+        const BACKFILL: &str = "checks.backfill_070"; // i18n-ok: meta key
+        if self.store.as_ref().is_some_and(|s| s.meta(BACKFILL).ok().flatten().is_none()) && !self.read_only() {
+            for id in vigia_core::checks::backfill(&self.items) {
+                if !ids.contains(&id) {
+                    ids.push(id);
+                }
+            }
+            let _ = self.write(|s| s.set_meta(BACKFILL, &db::now_secs().to_string()));
+        }
         if !ids.is_empty() {
             self.check(ids, cx);
         }
@@ -589,7 +629,7 @@ impl Data {
     pub fn sync_ics(&self) {
         // per-entity files were asked for on this database, so they follow it
         for (id, p) in &self.live_ics {
-            let mine: Vec<Item> = self.items.iter().filter(|i| i.entity == Some(*id)).cloned().collect();
+            let mine: Vec<Item> = self.items.iter().filter(|i| i.owned_by(*id)).cloned().collect();
             write_ics(p, &mine);
         }
         if self.temporary || !Settings::load().ics_sync() {

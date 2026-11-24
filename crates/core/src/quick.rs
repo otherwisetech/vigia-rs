@@ -184,7 +184,7 @@ pub fn parse(line: &str, today: Date, order: Order) -> Item {
     }
     let name = kept.join(" ");
     let domain = domain_token(&name);
-    let kind = guess_kind(&name).unwrap_or(if domain.is_some() { Kind::Domain } else { Kind::Custom });
+    let kind = guess_kind(&name).or_else(|| Kind::celebration_in(&name)).unwrap_or(if domain.is_some() { Kind::Domain } else { Kind::Custom });
     let mut it = Item::new(kind, if name.is_empty() { kind.label() } else { name });
     if let Some((sigil, owner)) = owner_ref {
         let kind = match sigil {
@@ -200,6 +200,8 @@ pub fn parse(line: &str, today: Date, order: Order) -> Item {
     {
         it.host = if kind == Kind::Domain { crate::rdap::normalize(&d).unwrap_or(d) } else { d };
     }
+    // "Cumpleaños @Ana 12/05/1990": the date is her birthday, coming back every year
+    it.normalize_celebration(today);
     it
 }
 
@@ -207,6 +209,14 @@ pub fn parse(line: &str, today: Date, order: Order) -> Item {
 mod tests {
     use super::*;
     use crate::date::ymd;
+
+    #[test]
+    fn birthdays_by_quick_add() {
+        let today = ymd(2026, 11, 24).unwrap();
+        let it = parse("Cumpleaños @Ana 12/05/1990", today, Order::DayFirst);
+        assert_eq!((it.kind, it.owner.as_str(), it.issued, it.expires), (Kind::Birthday, "Ana", ymd(1990, 5, 12), None));
+        assert_eq!(it.due_date(today), ymd(2027, 5, 12));
+    }
 
     #[test]
     fn lines() {

@@ -177,7 +177,7 @@ impl VigiaApp {
                 NodeRef::Entity(id) => {
                     let Some(e) = d.entity(id) else { continue };
                     let ring = vigia_core::view::worst_status(&d.items, id, today).map(|s| t.status(s)).unwrap_or(t.border);
-                    let count = d.items.iter().filter(|i| i.entity == Some(id) && i.state != vigia_core::model::State::Archived).count();
+                    let count = d.items.iter().filter(|i| i.owned_by(id) && i.state != vigia_core::model::State::Archived).count();
                     let center = self.graph.center == Some(id) && self.graph.radial;
                     let gg = g.clone();
                     nodes.push(

@@ -20,6 +20,11 @@ pub fn long_date(d: Date) -> String {
     i18n::t!("app.date.long", day = d.day(), month = vigia_core::model::month_name(d.month()), year = d.year())
 }
 
+/// "24 December": a yearly day without its year.
+pub fn long_day_month(month: u32, day: u32) -> String {
+    i18n::t!("app.date.day_month", day = day, month = vigia_core::model::month_name(month))
+}
+
 pub fn month_title(d: Date) -> String {
     i18n::t!("app.date.month", month = vigia_core::model::month_name(d.month()), year = d.year())
 }
@@ -187,6 +192,19 @@ impl VigiaApp {
         if attachments > 0 {
             badges = badges.child(icon(IconName::File, 12., t.ink_muted));
         }
+        let d = self.data.read(cx);
+        // seen from an owner's list: the item may be theirs through a company they own
+        if let Some(e) = self.filter.entity
+            && let Some(Some(via)) = vigia_core::view::via(it, e, &self.filter.through)
+            && let Some(x) = d.entity(via)
+        {
+            badges = badges.child(ui::chip(i18n::t!("app.list.via", name = x.name), t.ink_muted, 11.));
+        }
+        let owners = {
+            let names: Vec<String> = it.owner_ids().into_iter().filter_map(|o| d.entity(o).map(|e| e.name.clone())).collect();
+            if names.is_empty() { it.owner.clone() } else { names.join(", ") }
+        };
+        let sub = due.and_then(|d| it.celebration_text(d)).unwrap_or_else(|| it.kind.label());
         div()
             .id(key)
             .flex()
@@ -209,8 +227,8 @@ impl VigiaApp {
                     .flex_1()
                     .min_w_0()
                     .py(px(6.))
-                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.5)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!it.owner.is_empty(), |d| d.child(div().flex().items_center().gap(px(4.)).min_w_0().text_size(px(12.5)).text_color(t.ink_muted).child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 11., t.ink_muted)).child(div().truncate().child(it.owner.clone())))))
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).truncate().child(it.kind.label())),
+                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.5)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!owners.is_empty(), |d| d.child(div().flex().items_center().gap(px(4.)).min_w_0().text_size(px(12.5)).text_color(t.ink_muted).child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 11., t.ink_muted)).child(div().truncate().child(owners)))))
+                    .child(div().flex().items_center().gap(px(5.)).text_size(px(11.5)).text_color(t.ink_muted).child(crate::icons::kind_icon(it.kind, 11., t.ink_muted)).child(div().truncate().child(sub))),
             )
             .child(badges)
             .child(div().flex().flex_col().items_end().flex_none().child(div().text_size(px(12.5)).child(due.map(long_date).unwrap_or_else(|| i18n::t!("app.days.none")))).child(div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(color).child(days_text(it.days_left(today)))))
@@ -457,7 +475,7 @@ impl VigiaApp {
                             .text_size(px(11.))
                             .truncate()
                             .cursor_pointer()
-                            .child(it.title())
+                            .child(it.celebration_text(*day).unwrap_or_else(|| it.title()))
                             .on_click(cx.listener(move |this, _, _, cx| this.select(id, cx))),
                     );
                 }
@@ -499,13 +517,14 @@ impl VigiaApp {
             menu = menu.item(PopupMenuItem::new(i18n::t!("app.list.everyone")).checked(cur_ent.is_none() && cur_kind.is_none()).on_click(move |_, _, cx| {
                 w0.update(cx, |this, cx| {
                     this.filter.entity = None;
+                    this.filter.through.clear();
                     this.filter.entity_kind = None;
                     cx.notify();
                 })
                 .ok();
             }));
             for k in vigia_core::entity::EntityKind::ALL {
-                let mine: Vec<_> = entities.iter().filter(|e| e.kind == k).collect();
+                let mine: Vec<_> = entities.iter().filter(|e| e.kind == k && !e.archived).collect();
                 if mine.is_empty() {
                     continue;
                 }
@@ -513,6 +532,7 @@ impl VigiaApp {
                 menu = menu.separator().item(PopupMenuItem::new(crate::entities::section_title_case(k)).checked(cur_ent.is_none() && cur_kind == Some(k)).on_click(move |_, _, cx| {
                     wk.update(cx, |this, cx| {
                         this.filter.entity = None;
+                        this.filter.through.clear();
                         this.filter.entity_kind = Some(k);
                         cx.notify();
                     })
@@ -522,6 +542,7 @@ impl VigiaApp {
                     let (w1, id) = (w.clone(), e.id);
                     menu = menu.item(PopupMenuItem::new(e.name.clone()).checked(cur_ent == Some(id)).on_click(move |_, _, cx| {
                         w1.update(cx, |this, cx| {
+                            this.filter.through = vigia_core::entity::owned_through(id, &this.data.read(cx).relations);
                             this.filter.entity = Some(id);
                             this.filter.entity_kind = None;
                             cx.notify();

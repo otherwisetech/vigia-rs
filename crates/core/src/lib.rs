@@ -13,6 +13,7 @@ pub mod demo;
 pub mod entity;
 pub mod extract;
 pub mod feed;
+pub mod fields;
 pub mod graph;
 pub mod holidays;
 pub mod ics;

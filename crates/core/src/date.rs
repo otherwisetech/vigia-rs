@@ -372,6 +372,34 @@ pub fn parse_loose(s: &str, today: Date, order: Order) -> Option<Date> {
     find_dates(s, order).first().map(|f| f.date).or_else(|| find_relative(s, today).map(|f| f.date))
 }
 
+/// A date as typed in a form in that order: `12/05/2031` (day first) or `05/12/2031`.
+pub fn short(d: Date, order: Order) -> String {
+    match order {
+        Order::DayFirst => format!("{:02}/{:02}/{}", d.day(), d.month(), d.year()), // i18n-ok: date format
+        Order::MonthFirst => format!("{:02}/{:02}/{}", d.month(), d.day(), d.year()), // i18n-ok: date format
+    }
+}
+
+/// A day and month without a year (`24/12`, `12-24` in month-first order): `(month, day)`.
+pub fn parse_day_month(s: &str, order: Order) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = s.trim().split(['/', '-', '.', ' ']).filter(|p| !p.is_empty()).collect();
+    let [a, b] = parts.as_slice() else { return None };
+    let (a, b): (u32, u32) = (a.parse().ok()?, b.parse().ok()?);
+    let (month, day) = match order {
+        Order::DayFirst => (b, a),
+        Order::MonthFirst => (a, b),
+    };
+    ((1..=12).contains(&month) && (1..=last_day(2028, month)).contains(&day)).then_some((month, day))
+}
+
+/// The day and month typed in `order`: `24/12` → `24/12`, `12/24` in month-first.
+pub fn short_day_month(month: u32, day: u32, order: Order) -> String {
+    match order {
+        Order::DayFirst => format!("{day:02}/{month:02}"), // i18n-ok: date format
+        Order::MonthFirst => format!("{month:02}/{day:02}"), // i18n-ok: date format
+    }
+}
+
 /// The numeric order people use in a UI language.
 pub fn order_for(lang: &str) -> Order {
     if lang == "en" { Order::MonthFirst } else { Order::DayFirst }
@@ -395,6 +423,22 @@ pub fn yearly_next(month: u32, day: u32, from: Date) -> Date {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn form_dates_follow_the_order() {
+        let d = ymd(2031, 5, 12).unwrap();
+        assert_eq!(short(d, Order::DayFirst), "12/05/2031");
+        assert_eq!(short(d, Order::MonthFirst), "05/12/2031");
+        for o in [Order::DayFirst, Order::MonthFirst] {
+            assert_eq!(parse_loose(&short(d, o), d, o), Some(d), "round trip {o:?}");
+        }
+        assert_eq!(parse_day_month("24/12", Order::DayFirst), Some((12, 24)));
+        assert_eq!(parse_day_month("12-24", Order::MonthFirst), Some((12, 24)));
+        assert_eq!(parse_day_month("29/02", Order::DayFirst), Some((2, 29)));
+        assert_eq!(parse_day_month("31/02", Order::DayFirst), None);
+        assert_eq!(parse_day_month("24/12/1990", Order::DayFirst), None);
+        assert_eq!(short_day_month(12, 24, Order::DayFirst), "24/12");
+    }
 
     fn d(y: i32, m: u32, dd: u32) -> Date {
         ymd(y, m, dd).unwrap()
