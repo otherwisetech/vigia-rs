@@ -96,7 +96,9 @@ engine, for scripts and AI agents.
   `~/Library/Application Support/Vigia/vigia.db` (`%APPDATA%\Vigia`, `~/.local/share/vigia`):
   the first launch offers to move it, verified, with its attachments. Plain rollback journal (no
   WAL), so it can live in Dropbox, iCloud, OneDrive or Syncthing; a lock file shows when it is
-  open on another computer and conflicted copies are flagged. File → *Save As…*, *Move Database
+  open on another computer and conflicted copies are flagged. When the sync client replaces the
+  file under the open app (OneDrive's and Dropbox's File Provider on macOS do), Vigía reopens it
+  before the next save; a file that really can't be written shows *Read-only* and Save is off. File → *Save As…*, *Move Database
   To…*, *Show in Finder*, *Open Another Database…* and *Open Recent* (with *Locate…* for missing
   ones); a custom location is remembered. Attachments sit next to it in `vigia-files/`,
   referenced by relative path. Integrity check on open, forward-only migrations. **Back up**

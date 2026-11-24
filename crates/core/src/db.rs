@@ -134,6 +134,16 @@ pub enum StoreError {
     NotFound(ItemId),
     /// An entity can't be related to itself.
     SelfRelation,
+    /// The file can't be written (read-only file or folder); reads still work.
+    ReadOnly,
+}
+
+impl StoreError {
+    /// SQLite refused a write because of the file: read-only, or replaced under the open
+    /// connection (`SQLITE_READONLY_DBMOVED`, what a sync client's rename over the file gives).
+    pub fn is_read_only(&self) -> bool {
+        matches!(self, StoreError::ReadOnly) || matches!(self, StoreError::Sqlite(rusqlite::Error::SqliteFailure(c, _)) if c.code == rusqlite::ErrorCode::ReadOnly)
+    }
 }
 
 impl std::fmt::Display for StoreError {
@@ -147,6 +157,7 @@ impl std::fmt::Display for StoreError {
             StoreError::Corrupt(d) => write!(f, "{}", i18n::t!("core.db.corrupt", detail = d)),
             StoreError::NotFound(id) => write!(f, "{}", i18n::t!("core.db.not_found", id = id)),
             StoreError::SelfRelation => write!(f, "{}", i18n::t!("core.db.self_relation")),
+            StoreError::ReadOnly => write!(f, "{}", i18n::t!("core.db.read_only")),
         }
     }
 }
@@ -170,6 +181,23 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 pub struct Store {
     conn: Connection,
     path: PathBuf,
+    /// Which file `conn` has open (device, inode), to notice when the path points to another.
+    file: Option<(u64, u64)>,
+}
+
+/// (device, inode) of the file at `path`; `None` where there is no such notion (Windows, where
+/// an open file can't be replaced anyway).
+fn file_id(path: &Path) -> Option<(u64, u64)> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(path).ok().map(|m| (m.dev(), m.ino()))
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        None
+    }
 }
 
 fn d2s(d: Option<Date>) -> Option<String> {
@@ -263,7 +291,7 @@ impl Store {
         }
         let conn = Connection::open(path)?;
         conn.pragma_update(None, "application_id", APPLICATION_ID)?;
-        let mut s = Store { conn, path: path.to_path_buf() };
+        let mut s = Store { conn, path: path.to_path_buf(), file: file_id(path) };
         s.configure()?;
         s.migrate()?;
         s.set_meta("created", &now_secs().to_string())?;
@@ -285,10 +313,61 @@ impl Store {
         if version > latest_version() {
             return Err(StoreError::TooNew(version));
         }
-        let mut s = Store { conn, path: path.to_path_buf() };
+        let mut s = Store { conn, path: path.to_path_buf(), file: file_id(path) };
         s.configure()?;
         s.migrate()?;
         Ok(s)
+    }
+
+    /// SQLite opened the file read-only (it does so silently when the file or its folder
+    /// can't be written): every write would fail.
+    pub fn is_read_only(&self) -> bool {
+        self.conn.is_readonly(rusqlite::MAIN_DB).unwrap_or(false)
+    }
+
+    /// The path now holds another file than the one open. Sync clients (OneDrive's and
+    /// Dropbox's File Provider on macOS) save a downloaded or re-uploaded version by renaming a
+    /// new file over it; the old connection keeps the unlinked file and SQLite refuses writes
+    /// to it ("attempt to write a readonly database").
+    pub fn replaced(&self) -> bool {
+        self.file.is_some() && file_id(&self.path).is_some_and(|now| Some(now) != self.file)
+    }
+
+    /// Reopens the file at the path (after it was replaced, or to retry a refused write).
+    pub fn reopen(&mut self) -> Result<()> {
+        *self = Store::open(&self.path)?;
+        Ok(())
+    }
+
+    /// Reopens when the file was replaced; true when it did (the caller reloads).
+    pub fn refresh(&mut self) -> Result<bool> {
+        if !self.replaced() {
+            return Ok(false);
+        }
+        self.reopen()?;
+        Ok(true)
+    }
+
+    /// Runs one write: on the current file, retried once on a fresh connection when SQLite
+    /// refuses it as read-only; [`StoreError::ReadOnly`] when the file really can't be written.
+    pub fn write<T>(&mut self, mut f: impl FnMut(&mut Store) -> Result<T>) -> Result<T> {
+        self.refresh()?;
+        if self.is_read_only() {
+            self.reopen()?;
+            if self.is_read_only() {
+                return Err(StoreError::ReadOnly);
+            }
+        }
+        match f(self) {
+            Err(e) if e.is_read_only() => {
+                self.reopen()?;
+                if self.is_read_only() {
+                    return Err(StoreError::ReadOnly);
+                }
+                f(self).map_err(|e| if e.is_read_only() { StoreError::ReadOnly } else { e })
+            }
+            r => r,
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -1071,5 +1150,60 @@ mod tests {
         assert!(!legacy.exists() && !files_dir(&legacy).exists());
         let mode: String = s.conn.query_row("PRAGMA journal_mode", [], |r| r.get(0)).unwrap();
         assert_eq!(mode, "delete");
+    }
+
+    /// What OneDrive's File Provider does after a sync: a new file renamed over the open one.
+    #[cfg(unix)]
+    #[test]
+    fn writes_survive_the_file_being_replaced_by_a_sync_client() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vigia.db");
+        let mut s = Store::create(&path).unwrap();
+        s.insert_entity(&Entity::new(EntityKind::Person, "Ana Example")).unwrap();
+        let replace = || {
+            let tmp = dir.path().join(".vigia.db.sync");
+            std::fs::copy(&path, &tmp).unwrap();
+            std::fs::rename(&tmp, &path).unwrap();
+        };
+        replace();
+        assert!(s.replaced());
+        // the bug: the old connection refuses the write with a raw SQLite error
+        let raw = s.insert_entity(&Entity::new(EntityKind::Person, "Luis Example")).unwrap_err();
+        assert!(raw.is_read_only(), "{raw}");
+        // through `write` it lands in the file now at the path
+        s.write(|s| s.insert_entity(&Entity::new(EntityKind::Person, "Luis Example"))).unwrap();
+        assert!(!s.replaced());
+        replace();
+        assert!(s.refresh().unwrap(), "noticed and reopened");
+        s.write(|s| s.insert_entity(&Entity::new(EntityKind::Person, "Eva Example"))).unwrap();
+        let names: Vec<String> = Store::open(&path).unwrap().entities().unwrap().into_iter().map(|e| e.name).collect();
+        assert_eq!(names.len(), 3, "{names:?}");
+        assert!(!s.refresh().unwrap(), "same file: nothing to do");
+    }
+
+    #[test]
+    fn a_read_only_file_is_reported_not_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vigia.db");
+        drop(Store::create(&path).unwrap());
+        let mut perm = std::fs::metadata(&path).unwrap().permissions();
+        perm.set_readonly(true);
+        std::fs::set_permissions(&path, perm.clone()).unwrap();
+        // running as root (some CI containers) writes anyway: nothing to check there
+        if std::fs::OpenOptions::new().write(true).open(&path).is_ok() {
+            return;
+        }
+        let mut s = Store::open(&path).unwrap();
+        assert!(s.is_read_only());
+        assert!(s.items().unwrap().is_empty(), "still readable");
+        let e = s.write(|s| s.insert_entity(&Entity::new(EntityKind::Person, "Ana Example"))).unwrap_err();
+        assert!(matches!(e, StoreError::ReadOnly), "{e}");
+        assert_eq!(e.to_string(), i18n::t!("core.db.read_only"));
+        #[allow(clippy::permissions_set_readonly_false)]
+        perm.set_readonly(false);
+        std::fs::set_permissions(&path, perm).unwrap();
+        // writable again: the next write reopens and goes through
+        s.write(|s| s.insert_entity(&Entity::new(EntityKind::Person, "Ana Example"))).unwrap();
+        assert!(!s.is_read_only());
     }
 }

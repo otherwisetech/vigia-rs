@@ -135,6 +135,10 @@ impl Data {
             }
             cx.notify();
         }
+        if self.store.as_mut().is_some_and(|s| s.refresh().unwrap_or(false)) {
+            self.reload();
+            cx.notify();
+        }
         let st = storage::status(&self.path);
         if self.storage.as_ref() != Some(&st) {
             self.storage = Some(st);
@@ -146,8 +150,24 @@ impl Data {
         date::today()
     }
 
+    /// The file can't be written (read-only file or folder): the forms say so instead of
+    /// failing on Save.
+    pub fn read_only(&self) -> bool {
+        self.store.as_ref().is_some_and(Store::is_read_only)
+    }
+
+    /// One write on the open database, on a fresh connection when the sync client replaced
+    /// the file (see [`Store::write`]).
+    fn write<T>(&mut self, f: impl FnMut(&mut Store) -> db::Result<T>) -> Result<T, String> {
+        let s = self.store.as_mut().ok_or_else(|| i18n::t!("app.db.none"))?;
+        s.write(f).map_err(|e| e.to_string())
+    }
+
     pub fn reload(&mut self) {
-        let Some(s) = &self.store else { return };
+        let Some(s) = self.store.as_mut() else { return };
+        // a sync client may have put another file at the path: read that one
+        let _ = s.refresh();
+        let s = &*s;
         match s.items() {
             Ok(v) => self.items = v,
             Err(e) => self.error = Some(e.to_string()),
@@ -170,34 +190,32 @@ impl Data {
 
     /// Inserts (id 0) or updates; returns the id.
     pub fn save_entity(&mut self, e: Ent, cx: &mut Context<Self>) -> Result<EntityId, String> {
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
-        let id = if e.id == 0 { s.insert_entity(&e).map_err(|x| x.to_string())? } else { s.update_entity(&e).map(|_| e.id).map_err(|x| x.to_string())? };
+        let id = self.write(|s| if e.id == 0 { s.insert_entity(&e) } else { s.update_entity(&e).map(|_| e.id) })?;
         self.changed(cx);
         Ok(id)
     }
 
     pub fn delete_entity(&mut self, id: EntityId, cx: &mut Context<Self>) {
-        if let Some(s) = &self.store {
-            let _ = s.delete_entity(id);
-        }
+        let _ = self.write(|s| s.delete_entity(id));
         self.changed(cx);
     }
 
     pub fn relate(&mut self, from: EntityId, to: EntityId, role: Role, cx: &mut Context<Self>) -> Result<(), String> {
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
-        s.relate(from, to, role).map_err(|e| e.to_string())?;
+        self.write(|s| s.relate(from, to, role))?;
         self.changed(cx);
         Ok(())
     }
 
     /// Keeps (or stops keeping) `path` up to date with the entity's items.
     pub fn set_live_ics(&mut self, entity: EntityId, path: Option<PathBuf>, cx: &mut Context<Self>) {
-        let Some(s) = &self.store else { return };
+        if self.store.is_none() {
+            return;
+        }
         let key = format!("{LIVE_ICS}{entity}");
-        let _ = match &path {
+        let _ = self.write(|s| match &path {
             Some(p) => s.set_meta(&key, &p.display().to_string()),
             None => s.delete_meta(&key),
-        };
+        });
         self.changed(cx);
     }
 
@@ -207,8 +225,7 @@ impl Data {
         let body = vigia_core::calendars::read_file(path)?;
         let fallback = path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
         let c = Calendar { name: vigia_core::calendars::name_of(&body, &fallback), source: path.display().to_string(), body, fetched: Some(db::now_secs()), enabled: true, id: 0 };
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
-        s.save_calendar(&c).map_err(|e| e.to_string())?;
+        self.write(|s| s.save_calendar(&c))?;
         self.changed(cx);
         Ok(c.name)
     }
@@ -227,8 +244,7 @@ impl Data {
                     Some(p) => Calendar { body, fetched: Some(db::now_secs()), ..p },
                     None => Calendar { id: 0, name: vigia_core::calendars::name_of(&body, &fallback), source: url.clone(), body, fetched: Some(db::now_secs()), enabled: true },
                 };
-                let s = this.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
-                s.save_calendar(&c).map_err(|e| e.to_string())?;
+                this.write(|s| s.save_calendar(&c))?;
                 this.changed(cx);
                 Ok(c.name)
             });
@@ -243,8 +259,8 @@ impl Data {
         for c in self.calendars.clone() {
             if c.is_url() {
                 self.add_calendar_url(c.source.clone(), Some(c.id), cx, done.clone());
-            } else if let Some(s) = &self.store {
-                let r = vigia_core::calendars::read_file(Path::new(&c.source)).and_then(|body| s.save_calendar(&Calendar { body, fetched: Some(db::now_secs()), ..c.clone() }).map(|_| c.name.clone()).map_err(|e| e.to_string()));
+            } else if self.store.is_some() {
+                let r = vigia_core::calendars::read_file(Path::new(&c.source)).and_then(|body| self.write(|s| s.save_calendar(&Calendar { body: body.clone(), fetched: Some(db::now_secs()), ..c.clone() })).map(|_| c.name.clone()));
                 done(r, cx);
             }
         }
@@ -252,23 +268,19 @@ impl Data {
     }
 
     pub fn set_calendar_enabled(&mut self, id: i64, on: bool, cx: &mut Context<Self>) {
-        if let (Some(s), Some(c)) = (&self.store, self.calendars.iter().find(|c| c.id == id)) {
-            let _ = s.save_calendar(&Calendar { enabled: on, ..c.clone() });
+        if let Some(c) = self.calendars.iter().find(|c| c.id == id).cloned() {
+            let _ = self.write(|s| s.save_calendar(&Calendar { enabled: on, ..c.clone() }));
         }
         self.changed(cx);
     }
 
     pub fn remove_calendar(&mut self, id: i64, cx: &mut Context<Self>) {
-        if let Some(s) = &self.store {
-            let _ = s.delete_calendar(id);
-        }
+        let _ = self.write(|s| s.delete_calendar(id));
         self.changed(cx);
     }
 
     pub fn unrelate(&mut self, id: i64, cx: &mut Context<Self>) {
-        if let Some(s) = &self.store {
-            let _ = s.unrelate(id);
-        }
+        let _ = self.write(|s| s.unrelate(id));
         self.changed(cx);
     }
 
@@ -358,22 +370,18 @@ impl Data {
 
     /// Inserts (id 0) or updates; returns the id.
     pub fn save(&mut self, item: Item, cx: &mut Context<Self>) -> Result<ItemId, String> {
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
-        let id = if item.id == 0 { s.insert(&item).map_err(|e| e.to_string())? } else { s.update(&item).map(|_| item.id).map_err(|e| e.to_string())? };
+        let id = self.write(|s| if item.id == 0 { s.insert(&item) } else { s.update(&item).map(|_| item.id) })?;
         self.changed(cx);
         Ok(id)
     }
 
     pub fn delete(&mut self, id: ItemId, cx: &mut Context<Self>) {
-        if let Some(s) = &self.store {
-            let _ = s.delete(id);
-        }
+        let _ = self.write(|s| s.delete(id));
         self.changed(cx);
     }
 
     pub fn renew(&mut self, id: ItemId, new_expiry: Date, cost: Option<f64>, note: &str, cx: &mut Context<Self>) -> Result<(), String> {
-        let s = self.store.as_mut().ok_or_else(|| i18n::t!("app.db.none"))?;
-        s.renew(id, new_expiry, Self::today(), cost, note).map_err(|e| e.to_string())?;
+        self.write(|s| s.renew(id, new_expiry, Self::today(), cost, note))?;
         self.changed(cx);
         Ok(())
     }
@@ -393,10 +401,9 @@ impl Data {
     }
 
     pub fn attach(&mut self, id: ItemId, paths: &[PathBuf], cx: &mut Context<Self>) -> Result<usize, String> {
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
         let mut n = 0;
         for p in paths.iter().filter(|p| p.is_file()) {
-            s.attach(id, p).map_err(|e| e.to_string())?;
+            self.write(|s| s.attach(id, p))?;
             n += 1;
         }
         self.changed(cx);
@@ -404,9 +411,7 @@ impl Data {
     }
 
     pub fn detach(&mut self, attachment: i64, cx: &mut Context<Self>) {
-        if let Some(s) = &self.store {
-            let _ = s.detach(attachment);
-        }
+        let _ = self.write(|s| s.detach(attachment));
         self.changed(cx);
     }
 
@@ -498,9 +503,9 @@ impl Data {
     }
 
     pub fn import(&mut self, items: Vec<Item>, cx: &mut Context<Self>) -> Result<usize, String> {
-        let s = self.store.as_ref().ok_or_else(|| i18n::t!("app.db.none"))?;
+        // one write per item, so a retry never inserts one twice
         for it in &items {
-            s.insert(it).map_err(|e| e.to_string())?;
+            self.write(|s| s.insert(it))?;
         }
         self.changed(cx);
         Ok(items.len())
@@ -518,7 +523,7 @@ impl Data {
             return Vec::new();
         }
         let all: Vec<_> = plan.notify.iter().chain(plan.silent.iter()).copied().collect();
-        if s.mark_sent(&all).is_err() {
+        if s.write(|s| s.mark_sent(&all)).is_err() {
             return Vec::new();
         }
         let out: Vec<(ItemId, String, String)> = plan

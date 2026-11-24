@@ -497,6 +497,7 @@ impl VigiaApp {
     fn render_form(&self, t: &Tokens, cx: &mut Context<Self>) -> Stateful<Div> {
         let f = self.edit.as_ref().expect("form");
         let today = Data::today();
+        let ro = self.data.read(cx).read_only();
         let label = |s: String| div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(t.ink_muted).child(s);
         let field = |s: String, e: &Entity<InputState>| div().flex().flex_col().gap(px(3.)).child(label(s)).child(Input::new(e).small());
         let half = |a: Div, b: Div| div().flex().gap(px(8.)).child(a.flex_1().min_w_0()).child(b.flex_1().min_w_0());
@@ -680,6 +681,7 @@ impl VigiaApp {
                 cx.notify();
             })))
             .child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.notes"))).child(div().rounded(px(6.)).border_1().border_color(t.border).bg(t.canvas).px(px(6.)).py(px(4.)).text_size(px(12.5)).child(Textarea::new(&f.notes))))
+            .when(ro, |f| f.child(ui::read_only_note(t)))
             .child(
                 div()
                     .flex()
@@ -690,7 +692,7 @@ impl VigiaApp {
                         this.edit = None;
                         cx.notify();
                     })))
-                    .child(ui::filled_button(t, "form-save", t.accent).child(i18n::t!("app.dialog.save")).on_click(cx.listener(|this, _, _, cx| this.save_edit(cx)))),
+                    .child(ui::save_button(t, "form-save", ro).child(i18n::t!("app.dialog.save")).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))))),
             );
         Self::panel_shell(t, "form-panel").pb(px(20.)).child(form)
     }

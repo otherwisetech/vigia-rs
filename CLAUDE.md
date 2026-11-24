@@ -56,7 +56,9 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   (`<db>.lock.json`, heartbeat in the tick); open elsewhere → the "open on <host>" notice,
   never written without "Use here anyway". `--db PATH` is session-only and never remembered; `--demo` only
   seeds a database given with `--db` that is empty. Never put demo data in the default database.
-  Every change is written right away in small transactions; `journal_mode=DELETE` (never WAL) so
+  Every change is written right away in small transactions, through `Store::write` (reopens when
+  a sync client renamed a new file over the open one, which SQLite reports as a read-only
+  database; `StoreError::ReadOnly` when the file really can't be written, and the forms disable Save); `journal_mode=DELETE` (never WAL) so
   it can sit in a synced folder. Schema changes are a new entry at the end of `db::MIGRATIONS`
   (never edit a shipped one) plus a test. Attachments are copied (never moved) into
   `vigia-files/<item id>/` and referenced by relative `/`-separated paths.

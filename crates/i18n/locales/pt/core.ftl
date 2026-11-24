@@ -94,6 +94,7 @@ core.db.not_vigia = É um banco de dados, mas não do Vigía.
 core.db.too_new = Foi criado por uma versão mais nova do Vigía (esquema {version}). Atualize o aplicativo.
 core.db.corrupt = O banco de dados está danificado: {detail}
 core.db.not_found = Não existe o item {id}.
+core.db.read_only = Não é possível gravar neste banco de dados: o arquivo ou sua pasta são somente leitura. Nada foi salvo. Verifique as permissões do arquivo, ou se o app de sincronização não o está segurando, e abra-o de novo.
 
 # calendar
 core.ics.calendar_name = Vigía: vencimentos
