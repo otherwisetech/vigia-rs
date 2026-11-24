@@ -347,10 +347,10 @@ app.edit.biz_next = Jour ouvré suivant
 app.edit.biz_weekends = Week-ends seulement
 
 # Otherwise Apps: Today view, shared registry, deep links
-app.settings.otherwise = Otherwise Apps
-app.settings.today = Afficher les échéances dans Aujourd’hui et le Calendrier d’Otherwise Apps
-app.settings.registry_on = Personnes, véhicules, entreprises, biens et actifs numériques sont partagés avec les autres apps Otherwise (activé dans Otherwise Apps).
-app.settings.registry_off = Le partage des personnes, véhicules et entreprises avec les autres apps Otherwise est désactivé ; il s'active dans Otherwise Apps.
+app.settings.otherwise = Otherwise Hub
+app.settings.today = Afficher les échéances dans Aujourd’hui et le Calendrier d’Otherwise Hub
+app.settings.registry_on = Personnes, véhicules, entreprises, biens et actifs numériques sont partagés avec les autres apps Otherwise (activé dans Otherwise Hub).
+app.settings.registry_off = Le partage des personnes, véhicules et entreprises avec les autres apps Otherwise est désactivé ; il s'active dans Otherwise Hub.
 app.link.not_found = Cela n'est pas dans cette base de données Vigía.
 app.link.unknown = Vigía ne peut pas ouvrir ce lien : {url}
 
@@ -381,7 +381,7 @@ app.db.conflicts.other = {n} copies en conflit à côté de la base
 app.db.in_cloud = Dans {provider}
 app.db.in_data_folder = Dans le dossier de données Otherwise
 app.migrate.title = Déplacer la base vers le dossier de données Otherwise ?
-app.migrate.body = Vigía garde désormais sa base dans le dossier partagé par toutes les apps Otherwise (vous pouvez déplacer ce dossier, par exemple vers OneDrive, depuis Otherwise Apps → Réglages).
+app.migrate.body = Vigía garde désormais sa base dans le dossier partagé par toutes les apps Otherwise (vous pouvez déplacer ce dossier, par exemple vers OneDrive, depuis Otherwise Hub → Réglages).
 app.migrate.body_both = Il y a une base Vigía à l’ancien emplacement et une autre déjà dans le dossier de données Otherwise (peut-être d’un autre ordinateur). Laquelle Vigía doit-il utiliser ? Aucune n’est modifiée.
 app.migrate.from = Actuellement :
 app.migrate.to = Nouvel emplacement :

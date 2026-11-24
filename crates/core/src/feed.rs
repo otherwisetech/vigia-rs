@@ -9,6 +9,23 @@ use otherwise_link::Root;
 use otherwise_link::today::{self, Event, EventKind, Severity};
 
 pub const HORIZON: i64 = 30;
+/// `meta` key: the language the app shows, so the command line and Otherwise Helper publish
+/// Today and Calendar in it too (their own environment may say English).
+pub const LANG_META: &str = "feed.lang";
+
+/// Runs `f` (a publish) in the language the app last used on this database.
+pub fn in_app_language<T>(store: &crate::db::Store, f: impl FnOnce() -> T) -> T {
+    let prev = i18n::locale();
+    let lang = store.meta(LANG_META).ok().flatten();
+    if let Some(l) = &lang {
+        i18n::set_locale(l);
+    }
+    let out = f();
+    if lang.is_some() {
+        i18n::set_locale(prev);
+    }
+    out
+}
 /// An event left behind by an app that stopped running disappears this long after its date.
 const STALE_DAYS: i64 = 30;
 

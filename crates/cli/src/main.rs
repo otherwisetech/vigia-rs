@@ -277,8 +277,10 @@ pub(crate) fn publish_today(s: &Store) -> Option<usize> {
     }
     let items = s.items().ok()?;
     let entities = s.entities().ok()?;
-    let _ = vigia_core::calendar_feed::publish(&root, &items, &entities, date::today());
-    vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
+    vigia_core::feed::in_app_language(s, || {
+        let _ = vigia_core::calendar_feed::publish(&root, &items, &entities, date::today());
+        vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
+    })
 }
 
 fn open(a: &Args) -> Result<Store, String> {

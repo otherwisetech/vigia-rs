@@ -347,10 +347,10 @@ app.edit.biz_next = Próximo dia útil
 app.edit.biz_weekends = Só fins de semana
 
 # Otherwise Apps: Today view, shared registry, deep links
-app.settings.otherwise = Otherwise Apps
-app.settings.today = Mostrar o que vence em Hoje e no Calendário do Otherwise Apps
-app.settings.registry_on = Pessoas, veículos, empresas, imóveis e ativos digitais são compartilhados com os outros apps da Otherwise (ativado no Otherwise Apps).
-app.settings.registry_off = O compartilhamento de pessoas, veículos e empresas com os outros apps da Otherwise está desativado; ative-o no Otherwise Apps.
+app.settings.otherwise = Otherwise Hub
+app.settings.today = Mostrar o que vence em Hoje e no Calendário do Otherwise Hub
+app.settings.registry_on = Pessoas, veículos, empresas, imóveis e ativos digitais são compartilhados com os outros apps da Otherwise (ativado no Otherwise Hub).
+app.settings.registry_off = O compartilhamento de pessoas, veículos e empresas com os outros apps da Otherwise está desativado; ative-o no Otherwise Hub.
 app.link.not_found = Isso não está neste banco de dados do Vigía.
 app.link.unknown = O Vigía não consegue abrir este link: {url}
 
@@ -381,7 +381,7 @@ app.db.conflicts.other = {n} cópias em conflito ao lado do banco de dados
 app.db.in_cloud = No {provider}
 app.db.in_data_folder = Na pasta de dados do Otherwise
 app.migrate.title = Mover o banco de dados para a pasta de dados do Otherwise?
-app.migrate.body = O Vigía agora guarda o banco de dados na pasta compartilhada por todos os apps do Otherwise (você pode mover essa pasta, por exemplo para o OneDrive, em Otherwise Apps → Ajustes).
+app.migrate.body = O Vigía agora guarda o banco de dados na pasta compartilhada por todos os apps do Otherwise (você pode mover essa pasta, por exemplo para o OneDrive, em Otherwise Hub → Ajustes).
 app.migrate.body_both = Há um banco de dados do Vigía no lugar antigo e outro já na pasta de dados do Otherwise (talvez de outro computador). Qual o Vigía deve usar? Nenhum é alterado.
 app.migrate.from = Agora:
 app.migrate.to = Novo lugar:

@@ -326,6 +326,11 @@ impl Data {
             }
             return;
         }
+        // the command line and Otherwise Helper publish in this language too
+        let lang = i18n::locale();
+        if self.store.as_ref().is_some_and(|s| s.meta(vigia_core::feed::LANG_META).ok().flatten().as_deref() != Some(lang)) && !self.read_only() {
+            let _ = self.write(|s| s.set_meta(vigia_core::feed::LANG_META, lang));
+        }
         // the Calendar's file; otherwise-link skips the write when nothing changed
         let _ = vigia_core::calendar_feed::publish(&root, &self.items, &self.entities, Self::today());
         let events = vigia_core::feed::events(&self.items, &self.entities, Self::today());

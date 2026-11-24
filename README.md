@@ -123,7 +123,7 @@ engine, for scripts and AI agents.
   your calendar app can subscribe to (Settings → Calendar).
 - **Your data, one file**: a local **SQLite** database, by default in the Otherwise data folder
   shared by all Otherwise apps (`~/.otherwise/vigia/vigia.db`; move that folder, e.g. to
-  OneDrive, from Otherwise Apps → Settings). Versions before 0.2.1 used
+  OneDrive, from Otherwise Hub → Settings). Versions before 0.2.1 used
   `~/Library/Application Support/Vigia/vigia.db` (`%APPDATA%\Vigia`, `~/.local/share/vigia`):
   the first launch offers to move it, verified, with its attachments. Plain rollback journal (no
   WAL), so it can live in Dropbox, iCloud, OneDrive or Syncthing; a lock file shows when it is
@@ -166,7 +166,7 @@ vigia templates --kind pet            # suggested reminders per kind (SOAT, vacc
 vigia entity "Otherwise SAS"          # details, links and items; --name/--kind/--ident… to edit
 vigia relate Juan "Otherwise SAS" --role owner
 vigia holidays --country co --year 2026
-vigia today                           # publish what's due to Otherwise Apps' Today view
+vigia today                           # publish what's due to Otherwise Hub's Today view
 vigia sync                            # sync entities with the shared registry (when turned on)
 vigia mcp                             # MCP server on stdio (read-only; --allow-writes adds writes)
 ```
@@ -177,13 +177,13 @@ to act: the expiry, or the notice deadline of a contract), `days_left`, `status`
 results. CSV has `owner_kind` and `business_days` columns; .ics events name the owner and its
 kind.
 
-## Otherwise Apps
+## Otherwise Hub
 
 Vigía plugs into [otherwise-link](https://github.com/otherwisetech/otherwise-link), the shared
 layer of the Otherwise Technologies apps. Everything stays on the computer.
 
 - **Deep links.** The app registers `otherwise-vigia://` (and answers `otherwise://vigia/…`
-  through Otherwise Apps): macOS through the bundle's `Info.plist`, Linux through
+  through Otherwise Hub): macOS through the bundle's `Info.plist`, Linux through
   `packaging/linux/io.github.otherwisetech.vigia-app.desktop` (`MimeType=x-scheme-handler/…`,
   `Exec=… %u`), Windows through `HKCU\Software\Classes` on first start.
 
@@ -198,34 +198,34 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
 
 - **Calendar.** Every live item's deadline (expiry, or a contract's notice deadline) and its
   next reminder day, from 60 days back to 18 months ahead, go to `<data folder>/vigia/events.json`
-  for Otherwise Apps' Calendar (otherwise-link SPEC §9), each linking to `otherwise://vigia/item/<id>`;
+  for Otherwise Hub's Calendar (otherwise-link SPEC §9), each linking to `otherwise://vigia/item/<id>`;
   health items are private there ("Busy" in exports and for assistants). The same Settings switch
   as Today turns it off. Event kinds (`kind`):
 
   | kind | event | title |
   |------|-------|-------|
-  | `due` | the expiry or filing deadline itself (id `item-<id>`) | *SOAT vence · Mercedes CQC925* |
-  | `renewal` | the same, for something that repeats or renews | *Dominio se renueva · Otherwise SAS* |
-  | `warranty` | a warranty's end | *Garantía vence · Ana* |
+  | `due` | the expiry or filing deadline itself (id `item-<id>`) | *SOAT vence (Mercedes CQC925)* |
+  | `renewal` | the same, for something that repeats or renews | *vcity.io se renueva (Otherwise Technologies LLC)* |
+  | `warranty` | a warranty's end | *Garantía de Nevera vence (Ana)* |
   | `birthday`, `anniversary` | the day itself | *Cumpleaños de Juan José (36 años)* |
-  | `reminder` | the next lead reminder before it (id `item-<id>-reminder`); a calendar may hide these, Vigía notifies on its own | *Recordatorio: …* |
+  | `reminder` | the next lead reminder before it (id `item-<id>-reminder`), never on the real-date event; a calendar may hide these, Vigía notifies on its own | *Recordatorio: SOAT vence el 10 ene (Mercedes CQC925)* |
 
-  Fields are only ever added to this file, never removed.
+  Fields are only ever added to this file, never removed. Titles are in the language the app shows (the command line and Otherwise Helper use the one the app last saved in the database, meta `feed.lang`); the owner is its main entity, with the plate for a vehicle; a contract's notice deadline reads *Aviso de no renovación: …*.
 - **Today.** What is overdue or due in the next 30 days goes to `today/vigia.json`, which
-  Otherwise Apps shows in its Today view, each with a link to the item. Rewritten when it
+  Otherwise Hub shows in its Today view, each with a link to the item. Rewritten when it
   changes; Settings → *Show what’s due in Today and Calendar* turns it off (and removes the file).
   `vigia today` publishes it from the command line.
-- **Shared entities** (only when turned on in Otherwise Apps). People, companies, vehicles,
+- **Shared entities** (only when turned on in Otherwise Hub). People, companies, vehicles,
   properties and digital assets are synced both ways with the shared registry: matched by card
   id, by Vigía's ref, by tax id / plate / domain, else by name, so nothing is duplicated. Edits
-  in other apps land here; merges made in Otherwise Apps are followed; a card deleted there
+  in other apps land here; merges made in Otherwise Hub are followed; a card deleted there
   leaves the entity in Vigía (detached), and deleting an entity here only unlinks it. Pets and
   "other" stay local. `vigia sync` runs it from the command line; the app syncs after edits
   and every 5 minutes.
 - **MCP.** `vigia mcp` is a stdio MCP server, read-only: `summary`, `checks`, `entity`,
   `list_items`, `due`, `entities`, `item`, `entities_by_kind` (the sections: each owner's next
   deadline, status and missing suggestions) and `templates`. With `--allow-writes` (which
-  Otherwise Apps' hub passes only when you allow write tools) it adds the write tools; with
+  Otherwise Hub passes only when you allow write tools) it adds the write tools; with
   `--propose <folder>` (the app's assistant) they only leave a proposal for the app. Every
   write the app's screens can make has one:
 
@@ -245,7 +245,7 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
   documents' reference numbers) reach it masked to their last 4 characters.
 
   ```bash
-  claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Apps' hub
+  claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Hub
   ```
 
 ## AI assistant (⌘J)

@@ -172,7 +172,6 @@ core.cal.not_ics = Ce n'est pas un fichier iCalendar (.ics).
 
 # shared registry of the Otherwise apps
 core.sync.error = Registre partagé : {detail}
-core.cal.reminder = Rappel : {title}
 core.tpl.soat = SOAT (assurance obligatoire)
 core.tpl.tecnomecanica = Contrôle technique (técnico-mecánica)
 core.tpl.vehicle_insurance = Assurance tous risques
@@ -276,10 +275,10 @@ core.field.notes = Notes
 core.cal.birthday = Anniversaire de {name}
 core.cal.years.one = {title} (1 an)
 core.cal.years.other = {title} ({n} ans)
-core.cal.notice = Dernier jour de préavis : {name}
+core.cal.notice = Préavis de non-renouvellement : {name}
 core.cal.renews = {name} se renouvelle
 core.cal.expires = {name} expire
-core.cal.with_owner = {what} · {owner}
+core.cal.with_owner = {what} ({owner})
 core.check.unsupported = Ce registre ne peut pas être vérifié automatiquement : saisissez la date d'expiration à la main.
 core.agent.new_owner = {name} (nouveau : {kind})
 core.agent.no_owner = Appartient à : personne
@@ -348,3 +347,6 @@ core.agent.relate = {from} → {role} → {to}
 core.agent.no_link = {from} et {to} ne sont pas liés.
 core.agent.unrelate = Délier {from} et {to}
 core.tpl.anniversary = Anniversaire de mariage
+core.cal.warranty = La garantie de {name} expire
+core.cal.short_date = {day} {month}
+core.cal.reminder_on = Rappel : {what} le {date}

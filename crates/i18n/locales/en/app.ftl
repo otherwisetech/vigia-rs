@@ -347,10 +347,10 @@ app.edit.biz_next = Business day after
 app.edit.biz_weekends = Weekends only
 
 # Otherwise Apps: Today view, shared registry, deep links
-app.settings.otherwise = Otherwise Apps
-app.settings.today = Show what's due in Otherwise Apps' Today and Calendar
-app.settings.registry_on = People, vehicles, companies, properties and digital assets are shared with the other Otherwise apps (turned on in Otherwise Apps).
-app.settings.registry_off = Sharing people, vehicles and companies with the other Otherwise apps is off; it can be turned on in Otherwise Apps.
+app.settings.otherwise = Otherwise Hub
+app.settings.today = Show what's due in Otherwise Hub's Today and Calendar
+app.settings.registry_on = People, vehicles, companies, properties and digital assets are shared with the other Otherwise apps (turned on in Otherwise Hub).
+app.settings.registry_off = Sharing people, vehicles and companies with the other Otherwise apps is off; it can be turned on in Otherwise Hub.
 app.link.not_found = That isn't in this Vigía database.
 app.link.unknown = Vigía can't open this link: {url}
 
@@ -381,7 +381,7 @@ app.db.conflicts.other = {n} conflicted copies next to the database
 app.db.in_cloud = In {provider}
 app.db.in_data_folder = In the Otherwise data folder
 app.migrate.title = Move the database to the Otherwise data folder?
-app.migrate.body = Vigía now keeps its database in the folder all Otherwise apps share (you can move that folder, for example to OneDrive, from Otherwise Apps → Settings).
+app.migrate.body = Vigía now keeps its database in the folder all Otherwise apps share (you can move that folder, for example to OneDrive, from Otherwise Hub → Settings).
 app.migrate.body_both = There is a Vigía database in the old place and another one already in the Otherwise data folder (perhaps from another computer). Which one should Vigía use? Neither is changed.
 app.migrate.from = Now:
 app.migrate.to = New place:
