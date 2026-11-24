@@ -15,6 +15,7 @@ pub fn entities() -> Vec<Entity> {
         Entity { country: "CO".into(), ..e(EntityKind::Company, "Otherwise SAS") },                    // i18n-ok: demo company
         Entity { ident: "Calle 10 # 4-20, apto 301".into(), ..e(EntityKind::Property, "Apto 301") },   // i18n-ok: demo home
         Entity { detail: "Google".into(), ..e(EntityKind::Digital, "Google Workspace") },              // i18n-ok: demo account
+        Entity { detail: "Criollo".into(), year: Some(2021), ..e(EntityKind::Pet, "Luna") },           // i18n-ok: demo pet
     ]
 }
 
@@ -27,6 +28,7 @@ pub fn relations() -> Vec<(&'static str, &'static str, Role)> {
         ("Juan", "Apto 301", Role::Uses),                     // i18n-ok: demo names
         ("Ana", "Juan", Role::Family),                        // i18n-ok: demo names
         ("Otherwise SAS", "Google Workspace", Role::Owner),   // i18n-ok: demo names
+        ("Ana", "Luna", Role::Owner),                         // i18n-ok: demo names
     ]
 }
 
@@ -90,6 +92,13 @@ pub fn items(today: Date) -> Vec<Item> {
     let mut x = of(Item::new(Kind::Extinguisher, i18n::t!("core.demo.extinguisher")), "Apto 301", EntityKind::Property); // i18n-ok: demo home
     x.expires = at(300);
     v.push(x);
+    let luna = Entity { id: 0, kind: EntityKind::Pet, name: "Luna".into(), ..Default::default() }; // i18n-ok: demo pet
+    for (id, days) in [("pet_rabies", 21), ("pet_deworming", -2)] {
+        let mut it = crate::templates::by_id(id).map(|t| t.item(Some(&luna))).unwrap_or_default();
+        it.entity = None;
+        it.expires = at(days);
+        v.push(it);
+    }
     v
 }
 

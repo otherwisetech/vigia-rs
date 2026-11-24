@@ -16,7 +16,9 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               feature `ocr`), rdap.rs + cert.rs (parsers + thin network runners), checks.rs
               (Checker trait, apply outcomes), csv.rs, ics.rs (export, parse, RRULE
               occurrences), backup.rs (zip), settings.rs, paths.rs, demo.rs, entity.rs (owners:
-              kinds, plate / legal-suffix inference, find by name / ident, relations), graph.rs
+              kinds, plate / legal-suffix inference, find by name / ident, relations, masking of
+              people's document numbers, `suggest_kind` for migration 5), templates.rs
+              (suggested reminders per entity kind; never a date), graph.rs
               (map layout + camera math, deterministic), holidays.rs (computed public holidays,
               business-day shift), calendars.rs (read-only .ics overlays); otherwise-link
               integration: links.rs (deep-link routes, `new?…` prefill), feed.rs (Today
@@ -24,7 +26,7 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               (Otherwise Helper's jobs: reminders, checks with down / recovered / renewed)
 crates/i18n   vigia-i18n: embedded translation catalogs, t!/tn!/tv! macros, i18n guard tests
 crates/cli    `vigia`: list / due / show / add / edit / renew / delete / check / export /
-              import / backup / kinds / entities / entity / relate / holidays / today / sync /
+              import / backup / kinds / templates / entities / entity / relate / holidays / today / sync /
               path / mcp (mcp.rs: stdio MCP server, read-only unless --allow-writes or --propose), `--json`
               everywhere; background.rs: `vigia background manifest | run reminders|checks`
 crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, background tick
@@ -34,7 +36,8 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
               storage_ui.rs: Save As / Move / Show in Finder / Open Recent + Locate, lock
               notice, migration question;
               views.rs: dashboard / timeline / calendar / list (+ holidays / overlay menu);
-              entities.rs: entity page + form; graph.rs: the map canvas; panel.rs: item detail + edit
+              entities.rs: entity page + form; kinds.rs: section pages (cards + template
+              chips), the top bar's template picker, new-entity form; graph.rs: the map canvas; panel.rs: item detail + edit
               form; dialogs.rs: renew, delete, settings, OCR; macos.rs: NSStatusItem (from
               expense-rs); system.rs: notifications, launch at login; star.rs: GitHub star
               (from rama / nodo)
@@ -89,10 +92,15 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   ⌘J): the user's Claude Code / Codex / opencode with `vigia mcp --db <open db>` for that
   session only (never write the user's agent configs). The panel never gets `--allow-writes`:
   outside "Solo lectura" it starts `--propose <app dir>/assistant/live/<pid>/proposals`, where
-  `add_item` / `renew_item` only validate and drop a `vigia_core::agent::Proposal`; the window
+  `add_item` / `renew_item` / `propose_add_from_template` only validate and drop a `vigia_core::agent::Proposal`; the window
   polls it, shows cards and applies them with the same parsing (`agent::item_from_args`,
   `renewal_from_args`) through `Data::save` / `Data::renew` on Aplicar. A database open on
   another computer gets read tools only.
+- **Templates never carry a date** and never fix a calendar rule (`Wyoming` / `Yearly`): the
+  user enters legally set dates; tax filings get the accountant note. A new template needs its
+  label (and note) in every catalog; the catalogue test checks kind, interval and lead.
+- **People's document numbers stay local**: screens and `vigia mcp` show `entity::masked`
+  (last 4); only the edit form and the local CLI show them whole.
 - In app test modules don't `use super::*` (gpui's glob exports its own `test` attribute).
 - Comments: sparse, only non-obvious why.
 - GPUI pins: `Cargo.lock` pins zed `eb5483528be607b497afdaad0a237bebeb191249` and gpui-component

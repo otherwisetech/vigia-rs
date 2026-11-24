@@ -44,9 +44,28 @@ const TOOLS: &[Tool] = &[
     Tool { name: "due", description: "Items overdue or due within `days` (default 30), most urgent first.", schema: || json!({"type": "object", "properties": {"days": {"type": "integer", "minimum": 0}}}), write: false }, // i18n-ok: for agents
     Tool { name: "entities", description: "Who or what items belong to (person, vehicle, company, property, pet, digital, other), with item counts and their shared registry id when synced.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string"}}}), write: false }, // i18n-ok: for agents
     Tool { name: "item", description: "One item with its renewal history and attachments.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}), write: false }, // i18n-ok: for agents
+    Tool { name: "entities_by_kind", description: "The app's sections: owners grouped by kind (vehicle, pet, person, company, property, digital, other), each with its next deadline, its status (worst among its items) and the ids of suggested templates it doesn't have yet. People's document numbers show only their last 4 characters.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}}}), write: false }, // i18n-ok: for agents
+    Tool { name: "templates", description: "Suggested reminders per kind of owner (SOAT, técnico-mecánica, pet vaccines, passport, Cámara de Comercio, predial…): id, label, the kinds it is for, item kind, category, suggested recurrence and lead days. Templates never carry a date: ask the user for the real one. Use an id with propose_add_from_template.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}}}), write: false }, // i18n-ok: for agents
     Tool { name: "add_item", description: "Add an item: `text` is a quick-add line (\"Pasaporte @Ana 12/05/2031\"); kind, name, owner, expires (YYYY-MM-DD), host, notes override it.", schema: || json!({"type": "object", "properties": {"text": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "host": {"type": "string"}, "notes": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}}), write: true }, // i18n-ok: for agents
     Tool { name: "renew_item", description: "Record a renewal: the new expiry (default: the suggested next one), optional cost and note. The old date stays in the history.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}, "expires": {"type": "string"}, "cost": {"type": "number"}, "note": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["id"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "propose_add_from_template", description: "Add a reminder from a template (see the templates tool), e.g. \"recuérdame el SOAT del carro\" → template soat. owner: an entity's id, name, plate or tax id (left out: the only entity of the template's kind; an unknown name becomes a new entity of that kind). expires (YYYY-MM-DD) only when the user said the real date; never guess official dates.", schema: || json!({"type": "object", "properties": {"template": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "name": {"type": "string"}, "notes": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["template"]}), write: true }, // i18n-ok: for agents
 ];
+
+/// An item for the agent: identity documents show only the last 4 characters of their number.
+fn item_out(it: &Item, today: date::Date) -> Value {
+    let mut j = crate::item_json(it, today);
+    if it.category == Category::Identity && !it.reference.trim().is_empty() {
+        j["reference"] = json!(vigia_core::entity::masked(&it.reference));
+    }
+    j
+}
+
+/// An entity for the agent: a person's document number masked.
+fn entity_out(e: &vigia_core::entity::Entity, items: &[Item]) -> Value {
+    let mut j = crate::entity_json(e, items);
+    j["ident"] = json!(e.shown_ident());
+    j
+}
 
 fn ok(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
@@ -108,18 +127,19 @@ impl Server {
         let today = date::today();
         let str_arg = |k: &str| a.get(k).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty());
         let items = s.items().map_err(|e| e.to_string())?;
-        let list = |v: Vec<&Item>| json!({"count": v.len(), "items": v.iter().map(|i| crate::item_json(i, today)).collect::<Vec<_>>()});
+        let list = |v: Vec<&Item>| json!({"count": v.len(), "items": v.iter().map(|i| item_out(i, today)).collect::<Vec<_>>()});
         let order = date::order_for(i18n::locale());
         if !self.writes
             && let Some(dir) = &self.propose
             && vigia_core::agent::WRITE_TOOLS.contains(&name)
         {
             let preview = match name {
-                "add_item" => crate::item_json(&vigia_core::agent::item_from_args(a, today, order)?, today),
+                "add_item" => item_out(&vigia_core::agent::item_from_args(a, today, order)?, today),
+                "propose_add_from_template" => item_out(&vigia_core::agent::item_from_template_args(a, &s.entities().map_err(|e| e.to_string())?, today, order)?, today),
                 _ => {
                     let it = s.item(vigia_core::agent::needs_id(a)?).map_err(|e| e.to_string())?;
                     let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
-                    json!({"item": crate::item_json(&it, today), "new_expiry": date::iso(r.expires), "cost": r.cost, "note": r.note})
+                    json!({"item": item_out(&it, today), "new_expiry": date::iso(r.expires), "cost": r.cost, "note": r.note})
                 }
             };
             let p = vigia_core::agent::Proposal { tool: name.to_string(), args: a.clone(), reason: str_arg("reason").unwrap_or_default().to_string() };
@@ -129,8 +149,8 @@ impl Server {
         match name {
             "summary" => {
                 let c = view::counts(&items, today);
-                let failing: Vec<Value> = items.iter().filter(|i| i.auto_check && check_failed(i)).map(|i| crate::item_json(i, today)).collect();
-                Ok(json!({"today": date::iso(today), "expired": c.expired, "soon": c.soon, "upcoming": c.upcoming, "ok": c.ok, "undated": c.undated, "in_progress": c.in_progress, "total": c.total, "next": view::next(&items, today, 8).iter().map(|i| crate::item_json(i, today)).collect::<Vec<_>>(), "failing_checks": failing}))
+                let failing: Vec<Value> = items.iter().filter(|i| i.auto_check && check_failed(i)).map(|i| item_out(i, today)).collect();
+                Ok(json!({"today": date::iso(today), "expired": c.expired, "soon": c.soon, "upcoming": c.upcoming, "ok": c.ok, "undated": c.undated, "in_progress": c.in_progress, "total": c.total, "next": view::next(&items, today, 8).iter().map(|i| item_out(i, today)).collect::<Vec<_>>(), "failing_checks": failing}))
             }
             "checks" => {
                 let only = a.get("failing_only").and_then(Value::as_bool).unwrap_or(false);
@@ -138,7 +158,7 @@ impl Server {
                     .into_iter()
                     .filter(|i| !only || check_failed(i))
                     .map(|i| {
-                        let mut j = crate::item_json(i, today);
+                        let mut j = item_out(i, today);
                         j["last_checked_at"] = json!(i.last_checked.and_then(|t| chrono::DateTime::from_timestamp(t, 0)).map(|t| t.to_rfc3339()));
                         j["check_failed"] = json!(check_failed(i));
                         j
@@ -150,8 +170,8 @@ impl Server {
                 let entities = s.entities().map_err(|e| e.to_string())?;
                 let o = str_arg("owner").ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
                 let e = o.parse::<i64>().ok().and_then(|id| entities.iter().find(|e| e.id == id)).or_else(|| vigia_core::entity::find(&entities, o)).ok_or_else(|| format!("no entity {o:?}; see the entities tool"))?; // i18n-ok: for agents
-                let mut v = crate::entity_json(e, &items);
-                v["items"] = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today).iter().map(|i| crate::item_json(i, today)).collect();
+                let mut v = entity_out(e, &items);
+                v["items"] = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today).iter().map(|i| item_out(i, today)).collect();
                 let name_of = |id: i64| entities.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
                 v["relations"] = s.relations().map_err(|e| e.to_string())?.iter().filter(|r| r.from == e.id || r.to == e.id).map(|r| json!({"from": r.from, "from_name": name_of(r.from), "to": r.to, "to_name": name_of(r.to), "role": r.role.id()})).collect();
                 Ok(v)
@@ -174,13 +194,49 @@ impl Server {
             }
             "entities" => {
                 let kind = str_arg("kind").map(|k| EntityKind::from_id(k).ok_or_else(|| i18n::t!("cli.err.bad_entity_kind", value = k))).transpose()?;
-                let v: Vec<Value> = s.entities().map_err(|e| e.to_string())?.iter().filter(|e| kind.is_none_or(|k| e.kind == k)).map(|e| crate::entity_json(e, &items)).collect();
+                let v: Vec<Value> = s.entities().map_err(|e| e.to_string())?.iter().filter(|e| kind.is_none_or(|k| e.kind == k)).map(|e| entity_out(e, &items)).collect();
                 Ok(json!({"count": v.len(), "entities": v}))
+            }
+            "entities_by_kind" => {
+                let entities = s.entities().map_err(|e| e.to_string())?;
+                let only = str_arg("kind").map(|k| EntityKind::from_id(k).ok_or_else(|| i18n::t!("cli.err.bad_entity_kind", value = k))).transpose()?;
+                let sections: Vec<Value> = EntityKind::ALL
+                    .into_iter()
+                    .filter(|k| only.is_none_or(|o| o == *k))
+                    .map(|k| {
+                        let cards: Vec<Value> = view::cards(&entities, &items, k, today)
+                            .iter()
+                            .map(|c| {
+                                let own: Vec<&Item> = items.iter().filter(|i| i.entity == Some(c.entity.id) && i.state != vigia_core::model::State::Archived).collect();
+                                json!({"id": c.entity.id, "name": c.entity.name, "ident": c.entity.shown_ident(), "detail": c.entity.detail, "items": c.items, "status": c.status.map(|s| s.id()), "next": c.next.map(|i| item_out(i, today)), "missing_templates": vigia_core::templates::missing(k, &own).iter().map(|t| t.id).collect::<Vec<_>>()})
+                            })
+                            .collect();
+                        json!({"kind": k.id(), "label": k.label(), "count": cards.len(), "entities": cards})
+                    })
+                    .collect();
+                Ok(json!({"sections": sections}))
+            }
+            "templates" => {
+                let kind = str_arg("kind").map(|k| EntityKind::from_id(k).ok_or_else(|| i18n::t!("cli.err.bad_entity_kind", value = k))).transpose()?;
+                let v: Vec<Value> = match kind {
+                    Some(k) => vigia_core::templates::for_kind(k),
+                    None => vigia_core::templates::ALL.iter().collect(),
+                }
+                .into_iter()
+                .map(crate::template_json)
+                .collect();
+                Ok(json!({"count": v.len(), "templates": v}))
+            }
+            "propose_add_from_template" => {
+                let it = vigia_core::agent::item_from_template_args(a, &s.entities().map_err(|e| e.to_string())?, today, order)?;
+                let id = s.insert(&it).map_err(|e| e.to_string())?;
+                self.republish(&s);
+                Ok(item_out(&s.item(id).map_err(|e| e.to_string())?, today))
             }
             "item" => {
                 let id = a.get("id").and_then(Value::as_i64).ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
                 let it = s.item(id).map_err(|e| e.to_string())?;
-                let mut v = crate::item_json(&it, today);
+                let mut v = item_out(&it, today);
                 v["renewals"] = s.renewals(id).map_err(|e| e.to_string())?.iter().map(|r| json!({"on": date::iso(r.on), "old_expiry": r.old_expiry.map(date::iso), "new_expiry": r.new_expiry.map(date::iso), "cost": r.cost, "note": r.note})).collect();
                 v["attachments"] = s.attachments(id).map_err(|e| e.to_string())?.iter().map(|f| json!({"name": f.name, "path": s.attachment_path(f).display().to_string()})).collect();
                 v["link"] = json!(vigia_core::links::item_link(id).to_url());
@@ -190,7 +246,7 @@ impl Server {
                 let it = vigia_core::agent::item_from_args(a, today, order)?;
                 let id = s.insert(&it).map_err(|e| e.to_string())?;
                 self.republish(&s);
-                Ok(crate::item_json(&s.item(id).map_err(|e| e.to_string())?, today))
+                Ok(item_out(&s.item(id).map_err(|e| e.to_string())?, today))
             }
             "renew_item" => {
                 let mut s = s;
@@ -198,7 +254,7 @@ impl Server {
                 let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
                 let it = s.renew(r.id, r.expires, today, r.cost, &r.note).map_err(|e| e.to_string())?;
                 self.republish(&s);
-                Ok(crate::item_json(&it, today))
+                Ok(item_out(&it, today))
             }
             _ => Err(format!("unknown tool {name:?}")), // i18n-ok: protocol
         }
@@ -280,7 +336,7 @@ mod tests {
         assert_eq!(r.len(), 8, "the notification gets no answer");
         assert_eq!(r[0]["result"]["protocolVersion"], "2025-06-18");
         let names: Vec<&str> = r[1]["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-        assert_eq!(names, vec!["summary", "checks", "entity", "list_items", "due", "entities", "item"]);
+        assert_eq!(names, vec!["summary", "checks", "entity", "list_items", "due", "entities", "item", "entities_by_kind", "templates"]);
         assert!(r[1]["result"]["tools"].as_array().unwrap().iter().all(|t| t["annotations"]["readOnlyHint"] == true));
         assert_eq!(r[2]["result"]["structuredContent"]["count"], 1);
         assert_eq!(r[3]["result"]["structuredContent"]["items"][0]["kind"], "soat");
@@ -327,6 +383,58 @@ mod tests {
         let got = vigia_core::agent::collect(&dir);
         assert_eq!(got.iter().map(|p| p.tool.as_str()).collect::<Vec<_>>(), ["add_item", "renew_item"]);
         assert_eq!(got[0].reason, "found in the mail");
+    }
+
+    #[test]
+    fn template_tools_schemas_and_cards() {
+        let (d, p) = db();
+        let s = Store::open(&p).unwrap();
+        s.insert_entity(&vigia_core::entity::Entity { kind: EntityKind::Person, name: "Ana".into(), ident: "1020345678".into(), ..Default::default() }).unwrap();
+        let dir = d.path().join("proposals");
+        let mut srv = Server { db: p.clone(), writes: false, publish: false, propose: Some(dir.clone()) };
+        let list = srv.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).unwrap();
+        let tools = list["result"]["tools"].as_array().unwrap().clone();
+        for t in &tools {
+            let schema = &t["inputSchema"];
+            assert_eq!(schema["type"], "object", "{}", t["name"]);
+            let props = schema["properties"].as_object().unwrap();
+            for r in schema["required"].as_array().into_iter().flatten() {
+                assert!(props.contains_key(r.as_str().unwrap()), "{}: required {r} is a property", t["name"]);
+            }
+        }
+        let find = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap_or_else(|| panic!("{n}")).clone();
+        assert_eq!(find("templates")["annotations"]["readOnlyHint"], true);
+        assert_eq!(find("entities_by_kind")["annotations"]["readOnlyHint"], true);
+        let ebk = find("entities_by_kind");
+        let kinds: Vec<&str> = ebk["inputSchema"]["properties"]["kind"]["enum"].as_array().unwrap().iter().map(|v| v.as_str().unwrap()).collect();
+        assert_eq!(kinds, EntityKind::ALL.iter().map(|k| k.id()).collect::<Vec<_>>());
+        let add = find("propose_add_from_template");
+        assert_eq!((add["annotations"]["readOnlyHint"].clone(), add["inputSchema"]["required"].clone()), (json!(false), json!(["template"])));
+        let call = |srv: &mut Server, name: &str, args: Value| srv.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()["result"].clone();
+        let t = call(&mut srv, "templates", json!({"kind": "vehicle"}));
+        assert_eq!(t["structuredContent"]["templates"][0]["id"], "soat");
+        assert!(t["structuredContent"]["templates"].as_array().unwrap().iter().all(|t| t["lead_days"].as_array().is_some_and(|l| !l.is_empty())));
+        assert_eq!(call(&mut srv, "templates", json!({"kind": "spaceship"}))["isError"], true);
+        let sec = call(&mut srv, "entities_by_kind", json!({}))["structuredContent"].clone();
+        let by = |k: &str| sec["sections"].as_array().unwrap().iter().find(|s| s["kind"] == k).unwrap().clone();
+        let car = by("vehicle")["entities"][0].clone();
+        assert_eq!((car["name"].clone(), car["status"].clone(), car["next"]["kind"].clone()), (json!("Mazda ABC123"), json!("soon"), json!("soat")));
+        assert!(!car["missing_templates"].as_array().unwrap().contains(&json!("soat")));
+        assert!(car["missing_templates"].as_array().unwrap().contains(&json!("tecnomecanica")));
+        assert_eq!(by("person")["entities"][0]["ident"], "•••• 5678", "documents stay masked");
+        assert_eq!(call(&mut srv, "entity", json!({"owner": "Ana"}))["structuredContent"]["ident"], "•••• 5678");
+        // "recuérdame la técnico-mecánica del carro": a card, nothing written
+        let r = call(&mut srv, "propose_add_from_template", json!({"template": "tecnomecanica", "reason": "asked"}));
+        assert_eq!(r["structuredContent"]["status"], "awaiting_approval");
+        assert_eq!(r["structuredContent"]["preview"]["owner"], "Mazda ABC123");
+        assert_eq!(call(&mut srv, "propose_add_from_template", json!({"template": "nope"}))["isError"], true);
+        assert_eq!(Store::open(&p).unwrap().items().unwrap().len(), 2);
+        let got = vigia_core::agent::collect(&dir);
+        assert_eq!(got.iter().map(|p| p.tool.as_str()).collect::<Vec<_>>(), ["propose_add_from_template"]);
+        // with writes it saves
+        let mut srv = Server { db: p.clone(), writes: true, publish: false, propose: None };
+        let r = call(&mut srv, "propose_add_from_template", json!({"template": "pet_rabies", "owner": "Luna"}));
+        assert_eq!((r["structuredContent"]["kind"].clone(), r["structuredContent"]["owner_kind"].clone()), (json!("vaccine"), json!("pet")));
     }
 
     #[test]

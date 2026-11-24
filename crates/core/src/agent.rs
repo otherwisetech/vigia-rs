@@ -2,13 +2,15 @@
 //! its write tools (`add_item`, `renew_item`) into a checked [`Proposal`] dropped in that folder;
 //! the app shows it as a card and applies it, with the same parsing, only when the user accepts.
 use crate::date::{self, Date, Order};
+use crate::entity::{self, Entity};
 use crate::model::{Item, Kind};
+use crate::templates;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 /// The write tools that become proposals.
-pub const WRITE_TOOLS: &[&str] = &["add_item", "renew_item"];
+pub const WRITE_TOOLS: &[&str] = &["add_item", "renew_item", "propose_add_from_template"];
 
 fn str_arg<'a>(a: &'a Value, k: &str) -> Option<&'a str> {
     a.get(k).and_then(Value::as_str).map(str::trim).filter(|v| !v.is_empty())
@@ -44,6 +46,40 @@ pub fn item_from_args(a: &Value, today: Date, order: Order) -> Result<Item, Stri
     }
     if it.name.trim().is_empty() {
         it.name = it.kind.label();
+    }
+    Ok(it)
+}
+
+/// `propose_add_from_template`'s arguments → the item (not saved): `template` (an id from the
+/// `templates` tool), `owner` (an entity's id, name, plate or tax id; a new entity of the
+/// template's kind when nothing matches; left out, the only entity of that kind), and optional
+/// `expires`, `name` and `notes`.
+pub fn item_from_template_args(a: &Value, entities: &[Entity], today: Date, order: Order) -> Result<Item, String> {
+    let id = str_arg(a, "template").ok_or_else(|| i18n::t!("cli.err.needs_template"))?;
+    let tpl = templates::by_id(id).ok_or_else(|| i18n::t!("cli.err.bad_template", value = id))?;
+    let typed = str_arg(a, "owner").map(str::to_string).or_else(|| a.get("owner").and_then(Value::as_i64).map(|n| n.to_string()));
+    let owner = match typed.as_deref() {
+        Some(o) => o.parse::<i64>().ok().and_then(|n| entities.iter().find(|e| e.id == n)).or_else(|| entity::find(entities, o)).map(Ok).unwrap_or(Err(o)),
+        None => {
+            let mut of = entities.iter().filter(|e| tpl.owners.contains(&e.kind));
+            match (of.next(), of.next()) {
+                (Some(e), None) => Ok(e),
+                _ => return Err(i18n::t!("cli.err.needs_owner", kind = tpl.owners[0].label())),
+            }
+        }
+    };
+    let mut it = match owner {
+        Ok(e) => tpl.item(Some(e)),
+        Err(name) => Item { owner: name.to_string(), owner_kind: Some(entity::infer(name).filter(|k| tpl.owners.contains(k)).unwrap_or(tpl.owners[0])), ..tpl.item(None) },
+    };
+    if let Some(v) = str_arg(a, "expires") {
+        it.expires = Some(date::parse_loose(v, today, order).ok_or_else(|| i18n::t!("cli.err.bad_date", value = v))?);
+    }
+    if let Some(v) = str_arg(a, "name") {
+        it.name = v.into();
+    }
+    if let Some(v) = str_arg(a, "notes") {
+        it.notes = v.into();
     }
     Ok(it)
 }
@@ -125,6 +161,29 @@ mod tests {
         assert!(item_from_args(&json!({}), today, Order::DayFirst).is_err());
         assert!(item_from_args(&json!({"kind": "nope"}), today, Order::DayFirst).is_err());
         assert!(item_from_args(&json!({"name": "x", "expires": "someday"}), today, Order::DayFirst).is_err());
+    }
+
+    #[test]
+    fn template_arguments_find_the_owner_or_make_one() {
+        use crate::entity::EntityKind;
+        let today = day("2026-11-23");
+        let car = Entity { id: 2, kind: EntityKind::Vehicle, name: "Mazda".into(), ident: "ABC123".into(), ..Default::default() };
+        let ana = Entity { id: 1, kind: EntityKind::Person, name: "Ana".into(), ..Default::default() };
+        let es = vec![ana.clone(), car.clone()];
+        // "recuérdame el SOAT del carro": the only vehicle
+        let it = item_from_template_args(&json!({"template": "soat"}), &es, today, Order::DayFirst).unwrap();
+        assert_eq!((it.kind, it.entity, it.owner.as_str(), it.expires), (Kind::Soat, Some(2), "Mazda", None));
+        let it = item_from_template_args(&json!({"template": "soat", "owner": "abc-123", "expires": "2027-03-01"}), &es, today, Order::DayFirst).unwrap();
+        assert_eq!((it.entity, it.expires), (Some(2), Some(day("2027-03-01"))));
+        let it = item_from_template_args(&json!({"template": "pet_rabies", "owner": "Luna"}), &es, today, Order::DayFirst).unwrap();
+        assert_eq!((it.entity, it.owner.as_str(), it.owner_kind), (None, "Luna", Some(EntityKind::Pet)), "a new pet");
+        for owner in [json!(1), json!("1"), json!("ana")] {
+            assert_eq!(item_from_template_args(&json!({"template": "passport", "owner": owner}), &es, today, Order::DayFirst).unwrap().entity, Some(1));
+        }
+        assert!(item_from_template_args(&json!({"template": "pet_rabies"}), &es, today, Order::DayFirst).is_err(), "no pet to pick");
+        assert!(item_from_template_args(&json!({"template": "nope", "owner": "Ana"}), &es, today, Order::DayFirst).is_err());
+        assert!(item_from_template_args(&json!({"owner": "Ana"}), &es, today, Order::DayFirst).is_err());
+        assert!(item_from_template_args(&json!({"template": "soat", "expires": "someday"}), &es, today, Order::DayFirst).is_err());
     }
 
     #[test]

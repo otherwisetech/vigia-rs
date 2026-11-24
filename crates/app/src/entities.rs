@@ -94,7 +94,10 @@ impl VigiaApp {
         let name = val(&f.name);
         if !name.is_empty() {
             e.name = name;
+        } else if f.id == 0 {
+            return self.toast(i18n::t!("app.kinds.needs_name"), cx);
         }
+        let is_new = f.id == 0;
         e.ident = val(&f.ident);
         e.detail = val(&f.detail);
         e.country = val(&f.country).to_uppercase();
@@ -109,8 +112,11 @@ impl VigiaApp {
             }
         };
         match self.data.update(cx, |d, cx| d.save_entity(e, cx)) {
-            Ok(_) => {
+            Ok(id) => {
                 self.entity_edit = None;
+                if is_new {
+                    self.open_entity(id, cx);
+                }
                 cx.notify();
             }
             Err(err) => self.toast(err, cx),
@@ -189,7 +195,7 @@ impl VigiaApp {
         let mut facts = div().flex().flex_wrap().gap(px(16.)).text_size(px(12.5));
         let fact = |label: String, v: String| div().flex().flex_col().gap(px(1.)).child(div().text_size(px(11.)).text_color(t.ink_muted).child(label)).child(div().child(v));
         if let Some(l) = e.kind.ident_label().filter(|_| !e.ident.is_empty()) {
-            facts = facts.child(fact(l, e.ident.clone()));
+            facts = facts.child(fact(l, e.shown_ident()));
         }
         if let Some(l) = e.kind.detail_label().filter(|_| !e.detail.is_empty()) {
             facts = facts.child(fact(l, e.detail.clone()));
@@ -232,6 +238,9 @@ impl VigiaApp {
             }
         }
         col = col.child(stats);
+        if !vigia_core::templates::missing(e.kind, &live).is_empty() {
+            col = col.child(div().pt(px(6.)).child(ui::section_title(t, i18n::t!("app.tpl.suggested")))).child(self.template_chips(t, e.kind, Some(&e), &live, 9000, 8, cx));
+        }
 
         // links to other entities
         let weak = cx.entity().downgrade();
@@ -404,7 +413,7 @@ impl VigiaApp {
             .gap(px(10.))
             .px(px(18.))
             .pt(px(16.))
-            .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(i18n::t!("app.entity.edit")))
+            .child(div().text_size(px(16.)).font_weight(FontWeight::SEMIBOLD).child(if f.id == 0 { crate::kinds::add_label(cur) } else { i18n::t!("app.entity.edit") }))
             .child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.entity.kind"))).child(kind_btn))
             .child(field(i18n::t!("app.field.name"), &f.name));
         if let Some(l) = cur.ident_label() {

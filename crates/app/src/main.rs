@@ -7,6 +7,7 @@ mod assistant;
 mod dialogs;
 mod entities;
 mod graph;
+mod kinds;
 #[cfg(target_os = "macos")]
 mod macos;
 mod panel;
