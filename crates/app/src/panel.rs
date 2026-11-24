@@ -102,7 +102,8 @@ impl VigiaApp {
             business_days: it.business_days,
             name,
             owner,
-            owner_kind: None,
+            // a template for an owner still to name brings that owner's kind
+            owner_kind: it.owner_kind.filter(|_| it.entity.is_none() && it.id == 0),
             issued,
             expires,
             term: mk(it.term_months.map(|v| v.to_string()).unwrap_or_default(), String::new(), window, cx),

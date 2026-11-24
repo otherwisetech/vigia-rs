@@ -65,6 +65,9 @@ pub const MIGRATIONS: &[&str] = &[
     "ALTER TABLE entities ADD COLUMN shared_id TEXT;
      ALTER TABLE entities ADD COLUMN rev INTEGER NOT NULL DEFAULT 1;
      ALTER TABLE entities ADD COLUMN shared_rev INTEGER NOT NULL DEFAULT 0;",
+    // 5: entity kinds are sections; owners first taken for people take the kind all their
+    // items show, in `backfill_entity_kinds`
+    "CREATE INDEX entities_kind ON entities(kind);",
 ];
 
 /// Version 2: each distinct owner (case-insensitively) becomes an entity, its kind inferred
@@ -90,6 +93,26 @@ fn backfill_entities(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
             }
         };
         tx.execute("UPDATE items SET entity_id = ?2, owner = ?3 WHERE id = ?1", params![item, id, name])?;
+    }
+    Ok(())
+}
+
+/// Version 5: see [`entity::suggest_kind`]. Kinds this version doesn't know are left alone.
+fn backfill_entity_kinds(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    let ents: Vec<Entity> = {
+        let mut st = tx.prepare(&format!("SELECT {ENTITY_COLS} FROM entities WHERE kind = 'person' ORDER BY id"))?;
+        st.query_map([], entity_from_row)?.collect::<rusqlite::Result<_>>()?
+    };
+    for e in ents {
+        let kinds: Vec<String> = {
+            let mut st = tx.prepare("SELECT kind FROM items WHERE entity_id = ?1 AND state != 'archived' ORDER BY id")?;
+            st.query_map([e.id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        let items: Vec<Item> = kinds.iter().map(|k| Item::new(Kind::from_id(k).unwrap_or(Kind::Custom), "")).collect();
+        let refs: Vec<&Item> = items.iter().collect();
+        if let Some(k) = entity::suggest_kind(&e, &refs) {
+            tx.execute("UPDATE entities SET kind = ?2 WHERE id = ?1", params![e.id, k.id()])?;
+        }
     }
     Ok(())
 }
@@ -164,6 +187,10 @@ pub fn now_secs() -> i64 {
 /// The attachments folder for a database file.
 pub fn files_dir(db: &Path) -> PathBuf {
     db.parent().unwrap_or(Path::new(".")).join(FILES_DIR)
+}
+
+fn known_kinds() -> String {
+    serde_json::to_string(&EntityKind::ALL.iter().map(|k| k.id()).collect::<Vec<_>>()).unwrap_or_default()
 }
 
 const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind, i.business_days";
@@ -288,6 +315,9 @@ impl Store {
             tx.execute_batch(step)?;
             if i + 1 == 2 {
                 backfill_entities(&tx)?;
+            }
+            if i + 1 == 5 {
+                backfill_entity_kinds(&tx)?;
             }
             tx.pragma_update(None, "user_version", (i + 1) as i64)?;
             tx.commit()?;
@@ -487,8 +517,10 @@ impl Store {
     pub fn update_entity(&self, e: &Entity) -> Result<()> {
         let tx = self.conn.unchecked_transaction()?;
         let n = tx.execute(
-            "UPDATE entities SET kind = ?2, name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9, rev = rev + 1 WHERE id = ?1",
-            params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs()],
+            // a kind written by a newer version reads as "other": saving keeps it unless changed
+            "UPDATE entities SET kind = CASE WHEN ?2 = 'other' AND NOT EXISTS (SELECT 1 FROM json_each(?10) WHERE value = entities.kind) THEN kind ELSE ?2 END,
+               name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9, rev = rev + 1 WHERE id = ?1",
+            params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs(), known_kinds()],
         )?;
         if n == 0 {
             return Err(StoreError::NotFound(e.id));
@@ -862,6 +894,55 @@ mod tests {
         assert_eq!(items.iter().filter(|i| i.entity == Some(mazda)).count(), 2);
         assert!(items.iter().filter(|i| i.entity == Some(mazda)).all(|i| i.owner == "Mazda ABC123" && i.owner_kind == Some(EntityKind::Vehicle)));
         assert_eq!(items[6].entity, None);
+    }
+
+    #[test]
+    fn kinds_migrate_and_unknown_kinds_survive() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v4.db");
+        {
+            let mut c = Connection::open(&path).unwrap();
+            c.pragma_update(None, "application_id", APPLICATION_ID).unwrap();
+            let tx = c.transaction().unwrap();
+            for (i, step) in MIGRATIONS[..4].iter().enumerate() {
+                tx.execute_batch(step).unwrap();
+                if i + 1 == 2 {
+                    backfill_entities(&tx).unwrap();
+                }
+            }
+            tx.pragma_update(None, "user_version", 4).unwrap();
+            tx.commit().unwrap();
+            for (id, kind, name, ident, shared) in [(1, "person", "Mazda", "", None), (2, "person", "Ana", "", None), (3, "person", "Luna", "", None), (4, "person", "Renault", "", Some("u-1")), (5, "starship", "Enterprise", "NCC1701", None), (6, "person", "Kia", "", None)] {
+                c.execute("INSERT INTO entities (id, kind, name, ident, shared_id) VALUES (?1, ?2, ?3, ?4, ?5)", params![id, kind, name, ident, shared]).unwrap();
+            }
+            for (kind, ent, state) in [("soat", 1, "active"), ("tecnomecanica", 1, "active"), ("passport", 2, "active"), ("vaccine", 3, "active"), ("soat", 4, "active"), ("soat", 6, "active"), ("passport", 6, "archived")] {
+                c.execute("INSERT INTO items (kind, name, category, entity_id, state) VALUES (?1, 'x', 'other', ?2, ?3)", params![kind, ent, state]).unwrap();
+            }
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.version().unwrap(), latest_version());
+        let kind = |id| s.entity(id).unwrap().kind;
+        assert_eq!(kind(1), EntityKind::Vehicle, "only vehicle papers");
+        assert_eq!(kind(2), EntityKind::Person);
+        assert_eq!(kind(3), EntityKind::Person, "a vaccine could be anyone's");
+        assert_eq!(kind(4), EntityKind::Person, "shared entities are left alone");
+        assert_eq!(kind(6), EntityKind::Vehicle, "archived items don't count");
+        // a kind from a newer version reads as other and is kept on save
+        let mut e = s.entity(5).unwrap();
+        assert_eq!(e.kind, EntityKind::Other);
+        e.notes = "edited".into();
+        s.update_entity(&e).unwrap();
+        let raw: String = s.conn.query_row("SELECT kind FROM entities WHERE id = 5", [], |r| r.get(0)).unwrap();
+        assert_eq!(raw, "starship");
+        assert_eq!(s.entity(5).unwrap().notes, "edited");
+        e.kind = EntityKind::Vehicle;
+        s.update_entity(&e).unwrap();
+        assert_eq!(kind(5), EntityKind::Vehicle, "changing it is the user's call");
+        // and a known kind can still be set to other
+        let mut ana = s.entity(2).unwrap();
+        ana.kind = EntityKind::Other;
+        s.update_entity(&ana).unwrap();
+        assert_eq!(kind(2), EntityKind::Other);
     }
 
     #[test]

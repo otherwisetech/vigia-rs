@@ -111,6 +111,31 @@ pub fn worst_status(items: &[Item], entity: EntityId, today: Date) -> Option<Sta
     items.iter().filter(|i| i.entity == Some(entity) && i.state != State::Archived).map(|i| i.status(today)).filter(|s| *s != Status::Undated).min()
 }
 
+/// One entity on its kind's section page: its most urgent item and how it stands.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Card<'a> {
+    pub entity: &'a Entity,
+    /// The next deadline (overdue first) among its items, not archived.
+    pub next: Option<&'a Item>,
+    pub status: Option<Status>,
+    pub items: usize,
+}
+
+/// The cards of a section, most urgent first, then by name.
+pub fn cards<'a>(entities: &'a [Entity], items: &'a [Item], kind: EntityKind, today: Date) -> Vec<Card<'a>> {
+    let mut v: Vec<Card> = entities
+        .iter()
+        .filter(|e| e.kind == kind)
+        .map(|e| {
+            let own: Vec<&Item> = items.iter().filter(|i| i.entity == Some(e.id) && i.state != State::Archived).collect();
+            let next = sorted(own.iter().copied().filter(|i| i.due_date(today).is_some()), today).into_iter().next();
+            Card { entity: e, next, status: worst_status(items, e.id, today), items: own.len() }
+        })
+        .collect();
+    v.sort_by_key(|c| (c.status.unwrap_or(Status::Undated), c.entity.name.to_lowercase()));
+    v
+}
+
 /// One month on the timeline.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Month<'a> {
@@ -193,6 +218,10 @@ mod tests {
         assert_eq!(sec.iter().map(|(k, v)| (*k, v.iter().map(|(e, n)| (e.id, *n)).collect::<Vec<_>>())).collect::<Vec<_>>(), vec![(EntityKind::Person, vec![(1, 1), (3, 0)]), (EntityKind::Vehicle, vec![(2, 0)])]);
         assert_eq!(worst_status(&items, 1, today), Some(Status::Soon));
         assert_eq!(worst_status(&items, 2, today), None);
+        let cs = cards(&ents, &items, EntityKind::Person, today);
+        assert_eq!(cs.iter().map(|c| (c.entity.id, c.next.map(|i| i.id), c.status, c.items)).collect::<Vec<_>>(), vec![(1, Some(7), Some(Status::Soon), 1), (3, None, None, 0)]);
+        assert_eq!(cards(&ents, &items, EntityKind::Vehicle, today).len(), 1);
+        assert!(cards(&ents, &items, EntityKind::Pet, today).is_empty());
         items.retain(|i| i.state != State::Archived);
         let refs: Vec<&Item> = items.iter().collect();
         let (overdue, months) = timeline(&refs, today, 12);

@@ -25,4 +25,5 @@ pub mod rdap;
 pub mod reminder;
 pub mod settings;
 pub mod sync;
+pub mod templates;
 pub mod view;

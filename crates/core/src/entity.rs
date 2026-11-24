@@ -1,7 +1,7 @@
 //! Who or what an item belongs to: a person, a vehicle, a company, a property, a pet or a
 //! digital asset. Kinds are guessed from names (plates, legal suffixes, domains) and from type
 //! templates; the user can always change them.
-use crate::model::Kind;
+use crate::model::{Item, Kind};
 
 pub type EntityId = i64;
 
@@ -234,6 +234,35 @@ impl Kind {
     }
 }
 
+/// A document number with only its last 4 characters showing (`•••• 4321`): what screens and
+/// the AI tools show of a person's ID.
+pub fn masked(ident: &str) -> String {
+    let chars: Vec<char> = ident.chars().filter(|c| c.is_alphanumeric()).collect();
+    if chars.is_empty() {
+        return String::new();
+    }
+    let tail: String = chars[chars.len().saturating_sub(4)..].iter().collect();
+    format!("•••• {tail}") // i18n-ok: mask
+}
+
+impl Entity {
+    /// The identifier as shown: a person's document number masked, plates and tax ids as is.
+    pub fn shown_ident(&self) -> String {
+        if self.kind == EntityKind::Person { masked(&self.ident) } else { self.ident.clone() }
+    }
+}
+
+/// The kind an entity first taken for a person really is, when every one of its items says so
+/// (an owner "Mazda" with only a SOAT and a técnico-mecánica is a vehicle). Only for entities
+/// nobody described yet: no identifier or country, not linked to the shared registry.
+pub fn suggest_kind(e: &Entity, items: &[&Item]) -> Option<EntityKind> {
+    if e.kind != EntityKind::Person || !e.ident.trim().is_empty() || !e.country.trim().is_empty() || e.shared.is_some() || items.is_empty() {
+        return None;
+    }
+    let first = items[0].kind.entity_kind()?;
+    (first != EntityKind::Person && items.iter().all(|i| i.kind.entity_kind() == Some(first))).then_some(first)
+}
+
 /// The kind for a new entity named `name` on an item of type `item`: the name's own pattern,
 /// else the template's, else a person.
 pub fn guess(name: &str, item: Option<Kind>) -> EntityKind {
@@ -301,6 +330,29 @@ mod tests {
         assert_eq!(Kind::Rut.entity_kind(), Some(EntityKind::Company));
         assert!(EntityKind::ALL.iter().all(|k| EntityKind::from_id(k.id()) == Some(*k)));
         assert!(Role::ALL.iter().all(|r| Role::from_id(r.id()) == *r));
+    }
+
+    #[test]
+    fn masking_and_suggested_kinds() {
+        assert_eq!(masked("1.020.345.678"), "•••• 5678");
+        assert_eq!(masked("AB12"), "•••• AB12");
+        assert_eq!(masked(""), "");
+        let ana = Entity { kind: EntityKind::Person, name: "Ana".into(), ident: "1020345678".into(), ..Default::default() };
+        assert_eq!(ana.shown_ident(), "•••• 5678");
+        let car = Entity { kind: EntityKind::Vehicle, ident: "ABC123".into(), ..Default::default() };
+        assert_eq!(car.shown_ident(), "ABC123");
+        let soat = Item::new(Kind::Soat, "SOAT");
+        let tecno = Item::new(Kind::Tecnomecanica, "Tecno");
+        let pass = Item::new(Kind::Passport, "Pasaporte");
+        let custom = Item::new(Kind::Custom, "x");
+        let mazda = Entity { kind: EntityKind::Person, name: "Mazda".into(), ..Default::default() };
+        assert_eq!(suggest_kind(&mazda, &[&soat, &tecno]), Some(EntityKind::Vehicle));
+        assert_eq!(suggest_kind(&mazda, &[&soat, &custom]), None, "not every item says so");
+        assert_eq!(suggest_kind(&mazda, &[&pass]), None);
+        assert_eq!(suggest_kind(&mazda, &[]), None);
+        assert_eq!(suggest_kind(&Entity { ident: "x".into(), ..mazda.clone() }, &[&soat]), None, "described by the user");
+        assert_eq!(suggest_kind(&Entity { shared: Some("u".into()), ..mazda.clone() }, &[&soat]), None, "shared");
+        assert_eq!(suggest_kind(&Entity { kind: EntityKind::Company, ..mazda }, &[&soat]), None);
     }
 
     #[test]

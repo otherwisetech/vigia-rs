@@ -38,6 +38,23 @@ engine, for scripts and AI agents.
   deadlines, renewal history, files and **links** to other entities (Juan → owner of Otherwise
   SAS, member of Otherwise Technologies LLC, owner of the Mazda), and can keep a **live .ics
   file** of just its deadlines.
+- **Sections by kind, with one-click reminders.** The sidebar always shows *Vehículos*,
+  *Mascotas*, *Personas*, *Empresas*, *Hogar* and *Digital* (plus *Otros* when used). A section
+  lists its entities as cards — the next deadline, its status (overdue, soon, OK) and the
+  number of items — with *Agregar vehículo / mascota / …* to add one. Each kind has
+  **suggested reminders** as chips; one click opens the new-item form already filled with the
+  name, category, a typical interval and lead times, so you only set the date. Colombian-first:
+  SOAT, técnico-mecánica, seguro todo riesgo, impuesto vehicular, cambio de aceite, frenos,
+  licencia de tránsito; vacunas (rabia, múltiple), desparasitación, antipulgas, control
+  veterinario, baño; cumpleaños, cédula, pasaporte, visa, licencia de conducción, citas médicas,
+  odontología, exámenes, EPS; matrícula mercantil, RUT, renta, IVA, retención en la fuente,
+  pólizas, contratos, dominios and certificates (with the automatic checks), licencias de
+  software; predial, administración, servicios, seguro de hogar, gas, calentador, aire
+  acondicionado, extintor, garantías. Templates never set a date: legal dates (SOAT expiry, tax
+  calendars) are entered by you, and filings carry a *verifica las fechas con tu contador* note.
+  The top bar's **Sugerido** menu reaches the same from anywhere (kind → who → what);
+  `vigia templates` lists the catalogue. A person's document number shows only its last 4
+  characters on screen and to the assistant.
 - **Map**: entities and their items on a pan / zoom canvas, links drawn between them, rings
   coloured by the worst status (expired, ≤ 30 days, OK). Layered (people → companies → assets →
   items) or around one entity; drag from one node onto another to link them, click to open.
@@ -112,6 +129,7 @@ vigia check --all                     # RDAP / TLS checks of the items that opte
 vigia export ics vigia.ics            # or csv; import FILE.csv; backup FILE.zip
 vigia kinds                           # types, categories and default reminders
 vigia entities --kind vehicle         # people, vehicles, companies… with their item counts
+vigia templates --kind pet            # suggested reminders per kind (SOAT, vaccines, filings…)
 vigia entity "Otherwise SAS"          # details, links and items; --name/--kind/--ident… to edit
 vigia relate Juan "Otherwise SAS" --role owner
 vigia holidays --country co --year 2026
@@ -161,9 +179,12 @@ layer of the Otherwise Technologies apps. Everything stays on the computer.
   "other" stay local. `vigia sync` runs it from the command line; the app syncs after edits
   and every 5 minutes.
 - **MCP.** `vigia mcp` is a stdio MCP server, read-only: `summary`, `checks`, `entity`,
-  `list_items`, `due`, `entities`, `item`. With `--allow-writes` (which Otherwise Apps' hub
-  passes only when you allow write tools) it adds `add_item` and `renew_item`; with
-  `--propose <folder>` (the app's assistant) those two only leave a proposal for the app.
+  `list_items`, `due`, `entities`, `item`, `entities_by_kind` (the sections: each owner's next
+  deadline, status and missing suggestions) and `templates`. With `--allow-writes` (which
+  Otherwise Apps' hub passes only when you allow write tools) it adds `add_item`, `renew_item`
+  and `propose_add_from_template` (*recuérdame el SOAT del carro*); with `--propose <folder>`
+  (the app's assistant) those only leave a proposal for the app. People's document numbers
+  (and identity documents' reference numbers) reach it masked to their last 4 characters.
 
   ```bash
   claude mcp add vigia -- vigia mcp            # alone, or through Otherwise Apps' hub

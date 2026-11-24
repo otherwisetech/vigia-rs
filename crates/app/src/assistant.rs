@@ -21,7 +21,7 @@ use vigia_core::date;
 
 const APP_ID: &str = "vigia"; // i18n-ok: app id
 
-const INSTRUCTIONS: &str = "This is Vigía, an app that tracks things that expire: documents, vehicle papers, warranties, domains, TLS certificates, insurance, contracts, company filings. The MCP server \"vigia\" is the user's open database: summary (what needs attention), due, list_items, item (with its renewal history), checks (domains and certificates with their automatic RDAP / TLS check results), entities and entity (owners and their relations). Dates are YYYY-MM-DD; days_left is negative once overdue (\"vencido\"). Never invent dates; look them up. When add_item / renew_item are offered they only propose: each becomes a card the user accepts or rejects in the app, so tell them to review the card instead of saying it is done. Answer in the user's language."; // i18n-ok: agent instructions (English)
+const INSTRUCTIONS: &str = "This is Vigía, an app that tracks things that expire: documents, vehicle papers, warranties, domains, TLS certificates, insurance, contracts, company filings. The MCP server \"vigia\" is the user's open database: summary (what needs attention), due, list_items, item (with its renewal history), checks (domains and certificates with their automatic RDAP / TLS check results), entities and entity (owners and their relations), entities_by_kind (the app's sections: vehicles, pets, people, companies, home, digital, each owner with its next deadline and the suggested reminders it lacks) and templates (suggested reminders per kind). Dates are YYYY-MM-DD; days_left is negative once overdue (\"vencido\"). Never invent dates; look them up. For \"recuérdame el SOAT del carro\" use propose_add_from_template with a template id; ask for the real date rather than guessing it (official dates such as tax calendars are never invented: tell the user to check them with their accountant). When add_item / renew_item / propose_add_from_template are offered they only propose: each becomes a card the user accepts or rejects in the app, so tell them to review the card instead of saying it is done. Answer in the user's language."; // i18n-ok: agent instructions (English)
 
 const POLL: Duration = Duration::from_millis(800);
 
@@ -76,14 +76,16 @@ pub fn card_text(d: &Data, p: &Proposal) -> Result<(String, Vec<String>), String
     let today = Data::today();
     let mut lines = Vec::new();
     let title = match p.tool.as_str() {
-        "add_item" => {
-            let it = agent::item_from_args(&p.args, today, order())?;
+        "add_item" | "propose_add_from_template" => {
+            let it = proposed_item(d, p)?;
             lines.push(it.kind.label());
             if !it.owner.is_empty() {
                 lines.push(i18n::t!("app.assistant.card_owner", owner = it.owner));
             }
-            if let Some(e) = it.expires {
-                lines.push(i18n::t!("app.assistant.card_expires", date = date::iso(e)));
+            match it.expires {
+                Some(e) => lines.push(i18n::t!("app.assistant.card_expires", date = date::iso(e))),
+                None if p.tool != "add_item" => lines.push(i18n::t!("app.assistant.card_no_date")),
+                None => {}
             }
             if !it.host.is_empty() {
                 lines.push(it.host.clone());
@@ -112,12 +114,20 @@ pub fn card_text(d: &Data, p: &Proposal) -> Result<(String, Vec<String>), String
     Ok((title, lines))
 }
 
+/// The item an add proposal stands for, parsed as `vigia mcp` did.
+fn proposed_item(d: &Data, p: &Proposal) -> Result<vigia_core::model::Item, String> {
+    match p.tool.as_str() {
+        "propose_add_from_template" => agent::item_from_template_args(&p.args, &d.entities, Data::today(), order()),
+        _ => agent::item_from_args(&p.args, Data::today(), order()),
+    }
+}
+
 /// Saves an accepted proposal.
 fn apply(data: &Entity<Data>, p: &Proposal, cx: &mut App) -> Result<String, String> {
     let today = Data::today();
     match p.tool.as_str() {
-        "add_item" => {
-            let it = agent::item_from_args(&p.args, today, order())?;
+        "add_item" | "propose_add_from_template" => {
+            let it = proposed_item(data.read(cx), p)?;
             let name = it.name.clone();
             data.update(cx, |d, cx| d.save(it, cx))?;
             Ok(name)
@@ -218,6 +228,7 @@ impl VigiaApp {
             View::Calendar => format!("Calendar ({})", date::iso(self.cal_month)),
             View::List => "List of items".to_string(),
             View::Graph => "Map (owners and how they relate)".to_string(),
+            View::Kind(k) => format!("Section: {} (entities of kind {})", k.label(), k.id()),
             View::Entity(id) => format!("Owner page: {}", d.entity(id).map(|e| format!("{} (entity id {id})", e.name)).unwrap_or_default()),
         }; // i18n-ok: context for the agent (English)
         let mut v = serde_json::json!({ "view": view, "today": date::iso(Data::today()) });

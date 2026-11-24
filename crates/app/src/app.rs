@@ -123,20 +123,30 @@ pub enum View {
     Graph,
     /// One person / vehicle / company: its items, deadlines, files and links.
     Entity(vigia_core::entity::EntityId),
+    /// A section: every vehicle, pet, person… as a card, with suggested reminders.
+    Kind(vigia_core::entity::EntityKind),
 }
 
 impl View {
-    fn id(self) -> &'static str {
+    fn id(self) -> String {
+        if let View::Kind(k) = self {
+            return format!("kind:{}", k.id()); // i18n-ok: settings value
+        }
         match self {
             View::Dashboard => "dashboard",
             View::Timeline => "timeline",
             View::Calendar => "calendar",
             View::List | View::Entity(_) => "list",
             View::Graph => "graph",
+            View::Kind(_) => "dashboard",
         }
+        .to_string()
     }
 
     fn from_id(s: &str) -> View {
+        if let Some(k) = s.strip_prefix("kind:").and_then(vigia_core::entity::EntityKind::from_id) {
+            return View::Kind(k);
+        }
         match s {
             "timeline" => View::Timeline,
             "calendar" => View::Calendar,
@@ -262,7 +272,7 @@ impl VigiaApp {
     pub fn set_view(&mut self, v: View, cx: &mut Context<Self>) {
         self.view = v;
         if !matches!(v, View::Entity(_)) {
-            Settings::update(|s| s.view = Some(v.id().into()));
+            Settings::update(|s| s.view = Some(v.id()));
         }
         cx.notify();
     }
@@ -712,6 +722,7 @@ impl VigiaApp {
             .when(self.ocr_busy, |d| d.child(div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(t.ink_muted).child(gpui_component::spinner::Spinner::new().small().color(t.accent)).child(i18n::t!("app.ocr.reading"))))
             .child(ui::icon_button(t, "top-assistant", IconName::Bot, true).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.assistant.toggle")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.toggle_agent_panel(window, cx))))
             .child(ui::outline_button(t, "top-ocr").child(icon(IconName::File, 15., t.ink)).child(i18n::t!("app.ocr.button")).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.ocr.tooltip")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.read_document_dialog(None, window, cx))))
+            .child(self.template_picker(cx))
             .child(ui::filled_button(t, "top-new", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(i18n::t!("app.item.new_short")).on_click(cx.listener(|this, _, window, cx| this.new_item(window, cx))))
             .child(lang)
     }
@@ -720,7 +731,12 @@ impl VigiaApp {
         let today = Data::today();
         let d = self.data.read(cx);
         let counts = vigia_core::view::counts(&d.items, today);
-        let sections = vigia_core::view::sections(&d.entities, &d.items);
+        let used = vigia_core::view::sections(&d.entities, &d.items);
+        // every section shows, empty ones too (to add the first car or pet); other only when used
+        let sections: Vec<_> = vigia_core::templates::SECTIONS.into_iter().chain([vigia_core::entity::EntityKind::Other]).filter_map(|k| {
+            let ents = used.iter().find(|(u, _)| *u == k).map(|(_, v)| v.clone()).unwrap_or_default();
+            (vigia_core::templates::has_section(k) || !ents.is_empty()).then_some((k, ents))
+        }).collect();
         let mut cats: Vec<(Category, usize)> = Category::ALL.iter().map(|c| (*c, d.items.iter().filter(|i| i.category == *c && i.state != vigia_core::model::State::Archived).count())).filter(|(_, n)| *n > 0).collect();
         cats.sort_by_key(|(c, _)| *c);
         let hover = t.canvas;
@@ -803,20 +819,27 @@ impl VigiaApp {
                     .on_click(cx.listener(|this, _, _, cx| this.set_view(View::Graph, cx)))
             });
         for (kind, ents) in sections {
-            let kind_on = v == View::List && self.filter.entity_kind == Some(kind) && self.filter.entity.is_none();
-            side = side.child(
-                div()
-                    .id(("side-kind", kind as usize))
-                    .pt(px(14.))
-                    .pb(px(4.))
-                    .px(px(10.))
-                    .cursor_pointer()
-                    .child(ui::section_title(t, crate::entities::section_label(kind)).when(kind_on, |d| d.text_color(t.accent)))
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.filter = Filter { entity_kind: Some(kind), ..Default::default() };
-                        this.set_view(View::List, cx);
-                    })),
-            );
+            let kind_on = v == View::Kind(kind);
+            let plus_hover = t.border;
+            let header = div()
+                .id(("side-kind", kind as usize))
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .mt(px(10.))
+                .h(px(26.))
+                .px(px(10.))
+                .rounded(px(7.))
+                .cursor_pointer()
+                .when(kind_on, |d| d.bg(t.accent_soft))
+                .when(!kind_on, |d| d.hover(move |s| s.bg(hover)))
+                .child(div().flex_1().child(ui::section_title(t, crate::entities::section_label(kind)).when(kind_on, |d| d.text_color(t.accent))))
+                .child(div().id(("side-kind-add", kind as usize)).flex().items_center().justify_center().size(px(18.)).rounded(px(5.)).hover(move |s| s.bg(plus_hover)).child(icon(IconName::Plus, 11., t.ink_muted)).tooltip(move |w, cx| gpui_component::tooltip::Tooltip::new(crate::kinds::add_label(kind)).build(w, cx)).on_click(cx.listener(move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    this.start_new_entity(kind, window, cx);
+                })))
+                .on_click(cx.listener(move |this, _, _, cx| this.set_view(View::Kind(kind), cx)));
+            side = side.child(header);
             for (e, n) in ents {
                 let id = e.id;
                 let on = v == View::Entity(id);
@@ -1019,6 +1042,7 @@ impl Render for VigiaApp {
                     View::List => self.render_list(&t, cx).into_any_element(),
                     View::Graph => self.render_graph(window, cx),
                     View::Entity(id) => self.render_entity_page(&t, id, cx),
+                    View::Kind(k) => self.render_kind_page(&t, k, cx),
                 };
                 let accent = t.accent;
                 let center = div()

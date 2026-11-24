@@ -105,6 +105,21 @@ pub(crate) fn item_json(it: &Item, today: Date) -> Value {
     })
 }
 
+pub(crate) fn template_json(t: &vigia_core::templates::Template) -> Value {
+    json!({
+        "id": t.id,
+        "label": t.label(),
+        "for": t.owners.iter().map(|k| k.id()).collect::<Vec<_>>(),
+        "kind": t.kind.id(),
+        "category": t.category.id(),
+        "recurrence": t.recurrence.id(),
+        "lead_days": t.lead,
+        "term_months": t.term_months,
+        "notice_days": t.notice_days,
+        "note": t.note(),
+    })
+}
+
 pub(crate) fn entity_json(e: &Entity, items: &[Item]) -> Value {
     json!({
         "id": e.id,
@@ -491,6 +506,14 @@ fn run_command(a: &Args) -> Result<(), String> {
             let (from, to) = (date::ymd(year, 1, 1).unwrap_or(today), date::ymd(year, 12, 31).unwrap_or(today));
             let v = vigia_core::holidays::between(&countries, from, to);
             out(a, Value::Array(v.iter().map(|h| json!({"date": date::iso(h.date), "name": h.name, "country": h.country.id()})).collect()), || v.iter().map(|h| format!("{}  {:<6} {}", date::iso(h.date), h.country.id(), h.name)).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
+        }
+        "templates" => {
+            let kind = entity_kind_opt(a, "kind")?;
+            let v: Vec<&vigia_core::templates::Template> = match kind {
+                Some(k) => vigia_core::templates::for_kind(k),
+                None => vigia_core::templates::ALL.iter().collect(),
+            };
+            out(a, Value::Array(v.iter().map(|t| template_json(t)).collect()), || v.iter().map(|t| format!("{:<22} {:<9} {}", t.id, t.owners[0].id(), t.label())).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
         }
         "kinds" => {
             out(a, Value::Array(Kind::ALL.iter().map(|k| json!({"id": k.id(), "label": k.label(), "category": k.category().id(), "lead_days": k.lead_days(), "recurrence": k.recurrence().id()})).collect()), || Kind::ALL.iter().map(|k| format!("{:<22} {}", k.id(), k.label())).collect::<Vec<_>>().join("\n")); // i18n-ok: table row
