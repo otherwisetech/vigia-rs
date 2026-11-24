@@ -6,6 +6,7 @@ use crate::state::Data;
 use crate::theme::Tokens;
 use crate::ui::{self, icon};
 use crate::views::{days_text, long_date, month_title};
+use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputState};
@@ -428,7 +429,8 @@ impl VigiaApp {
         if cur.has_country() {
             form = form.child(field(i18n::t!("app.entity.country"), &f.country));
         }
-        form = form.child(field(i18n::t!("app.field.notes"), &f.notes)).child(
+        let ro = self.data.read(cx).read_only();
+        form = form.child(field(i18n::t!("app.field.notes"), &f.notes)).when(ro, |f| f.child(ui::read_only_note(t))).child(
             div()
                 .flex()
                 .justify_end()
@@ -438,7 +440,7 @@ impl VigiaApp {
                     this.entity_edit = None;
                     cx.notify();
                 })))
-                .child(ui::filled_button(t, "ent-form-save", t.accent).child(i18n::t!("app.dialog.save")).on_click(cx.listener(|this, _, _, cx| this.save_entity_edit(cx)))),
+                .child(ui::save_button(t, "ent-form-save", ro).child(i18n::t!("app.dialog.save")).when(!ro, |b| b.on_click(cx.listener(|this, _, _, cx| this.save_entity_edit(cx))))),
         );
         div().id("entity-form").flex().flex_col().flex_none().w(px(crate::panel::PANEL_W)).h_full().bg(t.surface).border_l_1().border_color(t.border).overflow_y_scroll().pb(px(20.)).child(form)
     }

@@ -909,6 +909,7 @@ impl VigiaApp {
             left = i18n::t!("app.db.temporary", rest = left);
         }
         let note = self.storage_note(cx);
+        let read_only = d.read_only();
         let checking = d.checking.len();
         let ink = t.ink;
         div()
@@ -925,6 +926,7 @@ impl VigiaApp {
             .text_color(t.ink_muted)
             .child(div().flex_1().min_w_0().truncate().child(left))
             .children(note.map(|(n, warn)| div().flex_none().text_color(if warn { t.danger } else { t.ink_muted }).child(n)))
+            .when(read_only, |d| d.child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(t.danger).child(i18n::t!("app.db.read_only_badge"))))
             .when(checking > 0, |d| d.child(i18n::tn!("app.check.running", checking)))
             .child(crate::star::footer_link(t, cx))
             .child(

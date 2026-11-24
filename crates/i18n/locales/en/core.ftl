@@ -94,6 +94,7 @@ core.db.not_vigia = It's a database, but not a Vigía one.
 core.db.too_new = It was made by a newer Vigía (schema {version}). Update the app.
 core.db.corrupt = The database is damaged: {detail}
 core.db.not_found = There is no item {id}.
+core.db.read_only = This database can't be written: the file or its folder is read-only. Nothing was saved. Check the file's permissions, or that the sync app isn't holding it, and open it again.
 
 # calendar
 core.ics.calendar_name = Vigía: deadlines

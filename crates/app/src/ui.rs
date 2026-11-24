@@ -74,6 +74,16 @@ pub fn filled_button(t: &Tokens, id: impl Into<ElementId>, bg: Hsla) -> Stateful
         .hover(move |s| s.bg(hover))
 }
 
+/// The form's Save: dimmed and inert while the database can't be written.
+pub fn save_button(t: &Tokens, id: impl Into<ElementId>, read_only: bool) -> Stateful<Div> {
+    if read_only { filled_button(t, id, t.ink_muted).opacity(0.45).cursor_default() } else { filled_button(t, id, t.accent) }
+}
+
+/// Above a form's buttons when nothing can be saved.
+pub fn read_only_note(t: &Tokens) -> Div {
+    div().flex().items_start().gap(px(6.)).text_size(px(11.5)).text_color(t.danger).child(icon(IconName::Info, 13., t.danger)).child(div().flex_1().child(i18n::t!("app.db.read_only_hint")))
+}
+
 /// Square icon-only 34 px control.
 pub fn icon_button(t: &Tokens, id: impl Into<ElementId>, name: IconName, enabled: bool) -> Stateful<Div> {
     let hover = t.canvas;

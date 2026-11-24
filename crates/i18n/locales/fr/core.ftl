@@ -94,6 +94,7 @@ core.db.not_vigia = C'est une base de données, mais pas de Vigía.
 core.db.too_new = Créée par une version plus récente de Vigía (schéma {version}). Mettez l'application à jour.
 core.db.corrupt = La base de données est endommagée : {detail}
 core.db.not_found = L'élément {id} n'existe pas.
+core.db.read_only = Impossible d’écrire dans cette base de données : le fichier ou son dossier est en lecture seule. Rien n’a été enregistré. Vérifiez les autorisations du fichier, ou que l’app de synchronisation ne le retient pas, puis rouvrez-le.
 
 # calendar
 core.ics.calendar_name = Vigía : échéances
