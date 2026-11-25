@@ -722,6 +722,7 @@ impl VigiaApp {
         }
         let typed_owner = f.owner.read(cx).value().trim().to_lowercase();
         let candidates: Vec<(vigia_core::entity::EntityId, String, EntityKind)> = ents.iter().filter(|e| !e.archived && !f.co_owners.contains(&e.id) && e.name.trim().to_lowercase() != typed_owner).map(|e| (e.id, e.name.clone(), e.kind)).collect();
+        let show_owners_row = !f.co_owners.is_empty() || !candidates.is_empty() && !typed_owner.is_empty();
         if !candidates.is_empty() && !typed_owner.is_empty() {
             let weak = cx.entity().downgrade();
             owners_row = owners_row.child(Button::new("co-owner-add").ghost().xsmall().icon(IconName::Plus).label(i18n::t!("app.edit.add_owner")).dropdown_menu(move |mut menu, _, _| {
@@ -753,7 +754,7 @@ impl VigiaApp {
             .child(field(i18n::t!("app.field.name"), &f.name))
             .child(field(i18n::t!("app.field.owner"), &f.owner))
             .children(owner_hint)
-            .child(owners_row);
+            .when(show_owners_row, |d| d.child(owners_row));
         if kind.is_celebration() {
             let typed = f.issued.read(cx).value().trim().to_string();
             let hint = match date::parse_day_month(&typed, order) {
