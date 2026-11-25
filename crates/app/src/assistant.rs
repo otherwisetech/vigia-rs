@@ -21,7 +21,7 @@ use vigia_core::date;
 
 const APP_ID: &str = "vigia"; // i18n-ok: app id
 
-const INSTRUCTIONS: &str = "This is Vigía, an app that tracks things that expire: documents, vehicle papers, warranties, domains, TLS certificates, insurance, contracts, company filings. The MCP server \"vigia\" is the user's open database: summary (what needs attention), due, list_items, item (with its renewal history), checks (domains and certificates with their automatic RDAP / TLS check results), entities and entity (owners and their relations), entities_by_kind (the app's sections: vehicles, pets, people, companies, home, digital, each owner with its next deadline and the suggested reminders it lacks) and templates (suggested reminders per kind). Dates are YYYY-MM-DD; days_left is negative once overdue (\"vencido\"). Never invent dates; look them up. For \"recuérdame el SOAT del carro\" use propose_add_from_template with a template id; ask for the real date rather than guessing it (official dates such as tax calendars are never invented: tell the user to check them with their accountant). When add_item / renew_item / propose_add_from_template are offered they only propose: each becomes a card the user accepts or rejects in the app, so tell them to review the card instead of saying it is done. Answer in the user's language."; // i18n-ok: agent instructions (English)
+const INSTRUCTIONS: &str = "This is Vigía, an app that tracks things that expire: documents, vehicle papers, warranties, domains, TLS certificates, insurance, contracts, company filings, birthdays. The MCP server \"vigia\" is the user's open database: summary (what needs attention), due, list_items, item (with its renewal history), checks (domains and certificates with their automatic RDAP / TLS check results), entities and entity (owners and their relations), entities_by_kind (the app's sections: vehicles, pets, people, companies, home, digital, each owner with its next deadline and the suggested reminders it lacks) and templates (suggested reminders per kind). Items can have several owners (people, companies…), and entities own other entities (a company owned by people, a car owned by a company). Dates are YYYY-MM-DD; days_left is negative once overdue (\"vencido\"). Never invent dates; look them up. For \"recuérdame el SOAT del carro\" use propose_add_from_template with a template id; ask for the real date rather than guessing it (official dates such as tax calendars are never invented: tell the user to check them with their accountant). To create a company or person use create_entity; to change items (owner, dates, cost…) use update_items with every id at once; archive with update_items state archived rather than deleting. Write tools only propose: each becomes a card the user accepts (and can undo) or rejects in the app, so tell them to review the card instead of saying it is done. Answer in the user's language."; // i18n-ok: agent instructions (English)
 
 const POLL: Duration = Duration::from_millis(800);
 
@@ -29,11 +29,13 @@ pub struct AgentState {
     pub panel: Option<WeakEntity<AgentPanel>>,
     pending: HashMap<String, Proposal>,
     seq: u32,
+    /// The last applied card and how to take it back (the toast's Undo).
+    pub last: Option<(String, Vec<agent::Undo>)>,
 }
 
 impl AgentState {
     pub fn new() -> AgentState {
-        AgentState { panel: None, pending: HashMap::new(), seq: 0 }
+        AgentState { panel: None, pending: HashMap::new(), seq: 0, last: None }
     }
 }
 
@@ -71,79 +73,27 @@ fn order() -> date::Order {
     date::order_for(i18n::locale())
 }
 
-/// The card's title and detail lines; `Err` when the proposal no longer makes sense.
+/// The proposal checked against the data as it is now; `Err` when it no longer makes sense.
+pub fn plan_of(d: &Data, p: &Proposal) -> Result<agent::Plan, String> {
+    let snap = agent::Snapshot { items: &d.items, entities: &d.entities, relations: &d.relations };
+    agent::plan(&p.tool, &p.args, &snap, Data::today(), order())
+}
+
+/// The card's title and detail lines.
 pub fn card_text(d: &Data, p: &Proposal) -> Result<(String, Vec<String>), String> {
-    let today = Data::today();
-    let mut lines = Vec::new();
-    let title = match p.tool.as_str() {
-        "add_item" | "propose_add_from_template" => {
-            let it = proposed_item(d, p)?;
-            lines.push(it.kind.label());
-            if !it.owner.is_empty() {
-                lines.push(i18n::t!("app.assistant.card_owner", owner = it.owner));
-            }
-            match it.expires {
-                Some(e) => lines.push(i18n::t!("app.assistant.card_expires", date = date::iso(e))),
-                None if p.tool != "add_item" => lines.push(i18n::t!("app.assistant.card_no_date")),
-                None => {}
-            }
-            if !it.host.is_empty() {
-                lines.push(it.host.clone());
-            }
-            i18n::t!("app.assistant.card_add", name = it.name)
-        }
-        "renew_item" => {
-            let id = agent::needs_id(&p.args)?;
-            let it = d.item(id).ok_or_else(|| i18n::t!("app.assistant.card_gone"))?;
-            let r = agent::renewal_from_args(it, &p.args, today, order())?;
-            let before = it.end_date(today).map(date::iso).unwrap_or_else(|| i18n::t!("app.assistant.no_date"));
-            lines.push(i18n::t!("app.assistant.card_renew_dates", before = before, after = date::iso(r.expires)));
-            if let Some(c) = r.cost {
-                lines.push(i18n::t!("app.assistant.card_cost", cost = c));
-            }
-            if !r.note.is_empty() {
-                lines.push(r.note.clone());
-            }
-            i18n::t!("app.assistant.card_renew", name = it.name)
-        }
-        other => return Err(other.to_string()),
-    };
+    let plan = plan_of(d, p)?;
+    let mut lines = plan.lines;
     if !p.reason.is_empty() {
         lines.push(i18n::t!("app.assistant.card_reason", reason = p.reason));
     }
-    Ok((title, lines))
+    Ok((plan.title, lines))
 }
 
-/// The item an add proposal stands for, parsed as `vigia mcp` did.
-fn proposed_item(d: &Data, p: &Proposal) -> Result<vigia_core::model::Item, String> {
-    match p.tool.as_str() {
-        "propose_add_from_template" => agent::item_from_template_args(&p.args, &d.entities, Data::today(), order()),
-        _ => agent::item_from_args(&p.args, Data::today(), order()),
-    }
-}
-
-/// Saves an accepted proposal.
-fn apply(data: &Entity<Data>, p: &Proposal, cx: &mut App) -> Result<String, String> {
-    let today = Data::today();
-    match p.tool.as_str() {
-        "add_item" | "propose_add_from_template" => {
-            let it = proposed_item(data.read(cx), p)?;
-            let name = it.name.clone();
-            data.update(cx, |d, cx| d.save(it, cx))?;
-            Ok(name)
-        }
-        "renew_item" => {
-            let id = agent::needs_id(&p.args)?;
-            let (r, name) = {
-                let d = data.read(cx);
-                let it = d.item(id).ok_or_else(|| i18n::t!("app.assistant.card_gone"))?;
-                (agent::renewal_from_args(it, &p.args, today, order())?, it.name.clone())
-            };
-            data.update(cx, |d, cx| d.renew(r.id, r.expires, r.cost, &r.note, cx))?;
-            Ok(name)
-        }
-        _ => Err(i18n::t!("app.assistant.card_gone")),
-    }
+/// Saves an accepted proposal: its title, and how to undo it when it can be.
+fn apply(data: &Entity<Data>, p: &Proposal, cx: &mut App) -> Result<(String, Option<Vec<agent::Undo>>), String> {
+    let plan = plan_of(data.read(cx), p)?;
+    let done = data.update(cx, |d, cx| d.apply_plan(&plan, cx))?;
+    Ok((plan.title, plan.undoable.then_some(done.undo)))
 }
 
 pub struct Host {
@@ -288,9 +238,25 @@ impl VigiaApp {
         if !approve {
             return Ok(());
         }
-        let name = apply(&self.data.clone(), &p, cx)?;
-        self.toast(i18n::t!("app.assistant.applied", name = name), cx);
+        let (title, undo) = apply(&self.data.clone(), &p, cx)?;
+        self.agent.last = undo.map(|u| (id.to_string(), u));
+        self.toast_for(i18n::t!("app.assistant.applied", name = title), Duration::from_secs(15), cx);
+        self.toast_undo = self.agent.last.is_some();
         Ok(())
+    }
+
+    /// The toast's Undo: takes the last applied card back.
+    pub fn undo_last_proposal(&mut self, cx: &mut Context<Self>) {
+        let Some((id, steps)) = self.agent.last.take() else { return };
+        match self.data.update(cx, |d, cx| d.undo(&steps, cx)) {
+            Ok(()) => {
+                if let Some(p) = self.agent_panel() {
+                    p.update(cx, |p, cx| p.set_change_state(&id, otherwise_agent_panel::history::ChangeState::Rejected, Some(i18n::t!("app.assistant.undone")), cx));
+                }
+                self.toast(i18n::t!("app.assistant.undone"), cx);
+            }
+            Err(e) => self.toast(e, cx),
+        }
     }
 }
 

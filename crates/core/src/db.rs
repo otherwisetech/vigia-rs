@@ -68,7 +68,81 @@ pub const MIGRATIONS: &[&str] = &[
     // 5: entity kinds are sections; owners first taken for people take the kind all their
     // items show, in `backfill_entity_kinds`
     "CREATE INDEX entities_kind ON entities(kind);",
+    // 6: an item can have several owners (`items.entity_id` stays the main one, mirrored in
+    // `item_owners` at pos 0); entities can be archived. `backfill_v6` merges owners the
+    // "Belongs to … New, as Digital" flow made twice and fills domains' names.
+    "CREATE TABLE item_owners (
+       item INTEGER NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+       entity INTEGER NOT NULL REFERENCES entities(id) ON DELETE CASCADE,
+       pos INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (item, entity));
+     CREATE INDEX item_owners_entity ON item_owners(entity);
+     INSERT INTO item_owners (item, entity, pos) SELECT id, entity_id, 0 FROM items WHERE entity_id IN (SELECT id FROM entities);
+     ALTER TABLE entities ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;",
 ];
+
+/// Version 6. Before 0.7 a domain's or certificate's new owner was offered as a *digital*
+/// entity, so "Otherwise SAS" or "Juan" could exist twice (a company and a digital one) or a
+/// company could be filed as digital. A digital entity nobody described (no identifier,
+/// details, year, country or notes; not shared) whose name is not itself a domain is merged
+/// into the person or company of the same name when there is one, else becomes a company when
+/// its name says so; anything else is left as it is. Items, co-owners and links move along;
+/// nothing is deleted but the empty duplicate. Domains with no domain name get their item's
+/// name when it is one.
+fn backfill_v6(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    let ents: Vec<Entity> = {
+        let mut st = tx.prepare(&format!("SELECT {ENTITY_COLS} FROM entities ORDER BY id"))?;
+        st.query_map([], entity_from_row)?.collect::<rusqlite::Result<_>>()?
+    };
+    for e in ents.iter().filter(|e| e.kind == EntityKind::Digital) {
+        let blank = e.ident.trim().is_empty() && e.detail.trim().is_empty() && e.year.is_none() && e.country.trim().is_empty() && e.notes.trim().is_empty() && e.shared.is_none();
+        if !blank || entity::infer(&e.name) == Some(EntityKind::Digital) {
+            continue;
+        }
+        let key = e.name.trim().to_lowercase();
+        let twin = ents.iter().find(|o| o.id != e.id && matches!(o.kind, EntityKind::Person | EntityKind::Company) && o.name.trim().to_lowercase() == key);
+        if let Some(t) = twin {
+            merge_into(tx, e.id, t.id)?;
+        } else if entity::has_legal_suffix(&e.name) {
+            tx.execute("UPDATE entities SET kind = 'company', rev = rev + 1 WHERE id = ?1", [e.id])?;
+        }
+    }
+    let doms: Vec<(i64, String)> = {
+        let mut st = tx.prepare("SELECT id, name FROM items WHERE kind = 'domain' AND trim(host) = ''")?;
+        st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect::<rusqlite::Result<_>>()?
+    };
+    for (id, name) in doms {
+        let mut it = Item { name, ..Item::new(Kind::Domain, "") };
+        it.fill_host();
+        if !it.host.is_empty() {
+            tx.execute("UPDATE items SET host = ?2 WHERE id = ?1", params![id, it.host])?;
+        }
+    }
+    Ok(())
+}
+
+/// Moves everything of entity `from` onto `into` and deletes `from`: items it owns (main or
+/// co-owner), its links (a link `into` already has, or one to itself, is dropped), a live .ics
+/// file, and its identifier / notes when `into` has none.
+fn merge_into(c: &Connection, from: EntityId, into: EntityId) -> rusqlite::Result<()> {
+    let name: String = c.query_row("SELECT name FROM entities WHERE id = ?1", [into], |r| r.get(0))?;
+    c.execute("UPDATE items SET entity_id = ?2, owner = ?3 WHERE entity_id = ?1", params![from, into, name])?;
+    c.execute("UPDATE OR IGNORE item_owners SET entity = ?2 WHERE entity = ?1", [from, into])?;
+    c.execute("DELETE FROM item_owners WHERE entity = ?1", [from])?;
+    // the main owner is always in item_owners too
+    c.execute("INSERT OR IGNORE INTO item_owners (item, entity, pos) SELECT id, entity_id, 0 FROM items WHERE entity_id = ?1", [into])?;
+    c.execute("UPDATE OR IGNORE relations SET from_id = ?2 WHERE from_id = ?1 AND to_id != ?2", [from, into])?;
+    c.execute("UPDATE OR IGNORE relations SET to_id = ?2 WHERE to_id = ?1 AND from_id != ?2", [from, into])?;
+    c.execute(
+        "UPDATE entities SET ident = CASE WHEN trim(ident) = '' THEN (SELECT ident FROM entities WHERE id = ?1) ELSE ident END,
+           notes = CASE WHEN trim(notes) = '' THEN (SELECT notes FROM entities WHERE id = ?1) ELSE notes END, rev = rev + 1 WHERE id = ?2",
+        [from, into],
+    )?;
+    let live = format!("live_ics:{from}"); // i18n-ok: meta key
+    c.execute("UPDATE OR IGNORE meta SET key = ?2 WHERE key = ?1", params![live, format!("live_ics:{into}")])?; // i18n-ok: meta key
+    c.execute("DELETE FROM meta WHERE key = ?1", [live])?;
+    c.execute("DELETE FROM entities WHERE id = ?1", [from])?;
+    Ok(())
+}
 
 /// Version 2: each distinct owner (case-insensitively) becomes an entity, its kind inferred
 /// from the name (plate → vehicle, legal suffix → company, domain → digital, else a person).
@@ -100,7 +174,8 @@ fn backfill_entities(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
 /// Version 5: see [`entity::suggest_kind`]. Kinds this version doesn't know are left alone.
 fn backfill_entity_kinds(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
     let ents: Vec<Entity> = {
-        let mut st = tx.prepare(&format!("SELECT {ENTITY_COLS} FROM entities WHERE kind = 'person' ORDER BY id"))?;
+        // the columns of version 5 (later ones don't exist yet)
+        let mut st = tx.prepare("SELECT id, kind, name, ident, detail, year, country, notes, created, updated, shared_id FROM entities WHERE kind = 'person' ORDER BY id")?;
         st.query_map([], entity_from_row)?.collect::<rusqlite::Result<_>>()?
     };
     for e in ents {
@@ -223,7 +298,7 @@ fn known_kinds() -> String {
 
 const ITEM_COLS: &str = "i.id, i.kind, i.name, COALESCE(e.name, i.owner), i.category, i.issued, i.expires, i.recurrence, i.term_months, i.notice_days, i.cost, i.currency, i.provider, i.reference, i.notes, i.tags, i.renewal_url, i.auto_renews, i.lead_days, i.state, i.snoozed_until, i.host, i.auto_check, i.last_checked, i.check_note, i.created, i.updated, i.entity_id, e.kind, i.business_days";
 const ITEM_FROM: &str = "items i LEFT JOIN entities e ON e.id = i.entity_id";
-const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated, shared_id";
+const ENTITY_COLS: &str = "id, kind, name, ident, detail, year, country, notes, created, updated, shared_id, archived";
 
 fn entity_from_row(r: &Row) -> rusqlite::Result<Entity> {
     Ok(Entity {
@@ -238,6 +313,7 @@ fn entity_from_row(r: &Row) -> rusqlite::Result<Entity> {
         created: r.get(8)?,
         updated: r.get(9)?,
         shared: r.get(10)?,
+        archived: r.get::<_, i64>(11).is_ok_and(|v| v != 0),
     })
 }
 
@@ -274,6 +350,7 @@ fn item_from_row(r: &Row) -> rusqlite::Result<Item> {
         entity: r.get(27)?,
         owner_kind: r.get::<_, Option<String>>(28)?.and_then(|k| EntityKind::from_id(&k)),
         business_days: crate::holidays::BusinessDays::parse(&r.get::<_, String>(29)?),
+        co_owners: Vec::new(),
     })
 }
 
@@ -398,6 +475,9 @@ impl Store {
             if i + 1 == 5 {
                 backfill_entity_kinds(&tx)?;
             }
+            if i + 1 == 6 {
+                backfill_v6(&tx)?;
+            }
             tx.pragma_update(None, "user_version", (i + 1) as i64)?;
             tx.commit()?;
         }
@@ -421,18 +501,45 @@ impl Store {
 
     pub fn items(&self) -> Result<Vec<Item>> {
         let mut st = self.conn.prepare(&format!("SELECT {ITEM_COLS} FROM {ITEM_FROM} ORDER BY i.id"))?;
-        let v = st.query_map([], item_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut v = st.query_map([], item_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut co: std::collections::HashMap<ItemId, Vec<EntityId>> = std::collections::HashMap::new();
+        let mut st = self.conn.prepare("SELECT o.item, o.entity FROM item_owners o JOIN items i ON i.id = o.item WHERE i.entity_id IS NOT o.entity ORDER BY o.item, o.pos, o.entity")?;
+        for r in st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))? {
+            let (i, e) = r?;
+            co.entry(i).or_default().push(e);
+        }
+        for it in &mut v {
+            it.co_owners = co.remove(&it.id).unwrap_or_default();
+        }
         Ok(v)
     }
 
     pub fn item(&self, id: ItemId) -> Result<Item> {
-        self.conn.query_row(&format!("SELECT {ITEM_COLS} FROM {ITEM_FROM} WHERE i.id = ?1"), [id], item_from_row).optional()?.ok_or(StoreError::NotFound(id))
+        let mut it = self.conn.query_row(&format!("SELECT {ITEM_COLS} FROM {ITEM_FROM} WHERE i.id = ?1"), [id], item_from_row).optional()?.ok_or(StoreError::NotFound(id))?;
+        it.co_owners = self.co_owners(id, it.entity)?;
+        Ok(it)
+    }
+
+    fn co_owners(&self, item: ItemId, main: Option<EntityId>) -> Result<Vec<EntityId>> {
+        let mut st = self.conn.prepare("SELECT entity FROM item_owners WHERE item = ?1 AND entity IS NOT ?2 ORDER BY pos, entity")?;
+        let v = st.query_map(params![item, main], |r| r.get(0))?.collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(v)
+    }
+
+    /// Writes the item's owners: the main one at pos 0, then the others that exist, in order.
+    fn write_owners(&self, item: ItemId, main: Option<EntityId>, co: &[EntityId]) -> Result<()> {
+        self.conn.execute("DELETE FROM item_owners WHERE item = ?1", [item])?;
+        let mut pos = 0;
+        for e in main.into_iter().chain(co.iter().copied()) {
+            pos += self.conn.execute("INSERT OR IGNORE INTO item_owners (item, entity, pos) SELECT ?1, id, ?3 FROM entities WHERE id = ?2", params![item, e, pos])? as i64;
+        }
+        Ok(())
     }
 
     /// Inserts `item` (its id is ignored) and returns the new id.
     pub fn insert(&self, item: &Item) -> Result<ItemId> {
         let now = now_secs();
-        let (entity, owner) = self.resolve_owner(item)?;
+        let (entity, owner, co) = self.resolve_owners(item)?;
         self.conn.execute(
             "INSERT INTO items (kind, name, owner, category, issued, expires, recurrence, term_months, notice_days, cost, currency, provider, reference, notes, tags, renewal_url, auto_renews, lead_days, state, snoozed_until, host, auto_check, last_checked, check_note, created, updated, entity_id, business_days)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?25, ?26, ?27)",
@@ -466,11 +573,13 @@ impl Store {
                 item.business_days.map(|b| b.id()).unwrap_or_default(),
             ],
         )?;
-        Ok(self.conn.last_insert_rowid())
+        let id = self.conn.last_insert_rowid();
+        self.write_owners(id, entity, &co)?;
+        Ok(id)
     }
 
     pub fn update(&self, item: &Item) -> Result<()> {
-        let (entity, owner) = self.resolve_owner(item)?;
+        let (entity, owner, co) = self.resolve_owners(item)?;
         let n = self.conn.execute(
             "UPDATE items SET kind = ?2, name = ?3, owner = ?4, category = ?5, issued = ?6, expires = ?7, recurrence = ?8, term_months = ?9, notice_days = ?10, cost = ?11, currency = ?12, provider = ?13, reference = ?14, notes = ?15, tags = ?16, renewal_url = ?17, auto_renews = ?18, lead_days = ?19, state = ?20, snoozed_until = ?21, host = ?22, auto_check = ?23, last_checked = ?24, check_note = ?25, updated = ?26, entity_id = ?27, business_days = ?28 WHERE id = ?1",
             params![
@@ -507,7 +616,7 @@ impl Store {
         if n == 0 {
             return Err(StoreError::NotFound(item.id));
         }
-        Ok(())
+        self.write_owners(item.id, entity, &co)
     }
 
     /// Deletes the item, its history and its attachment files.
@@ -540,12 +649,51 @@ impl Store {
         Ok(item)
     }
 
+    /// Takes back a renewal (undo): its history row goes and the item returns to `before`.
+    pub fn undo_renewal(&self, renewal: i64, before: &Item) -> Result<()> {
+        self.conn.execute("DELETE FROM renewals WHERE id = ?1 AND item = ?2", params![renewal, before.id])?;
+        self.update(before)
+    }
+
     pub fn renewals(&self, id: ItemId) -> Result<Vec<Renewal>> {
         let mut st = self.conn.prepare("SELECT id, item, on_date, old_expiry, new_expiry, cost, note FROM renewals WHERE item = ?1 ORDER BY on_date DESC, id DESC")?;
         let v = st
             .query_map([id], |r| Ok(Renewal { id: r.get(0)?, item: r.get(1)?, on: s2d(Some(r.get(2)?)).unwrap_or_default(), old_expiry: s2d(r.get(3)?), new_expiry: s2d(r.get(4)?), cost: r.get(5)?, note: r.get(6)? }))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(v)
+    }
+
+    /// The main owner (see [`Store::resolve_owner`]) and the other owners that exist. With no
+    /// main owner named, the first other one becomes the main one.
+    fn resolve_owners(&self, item: &Item) -> Result<(Option<EntityId>, String, Vec<EntityId>)> {
+        let (mut main, mut name) = self.resolve_owner(item)?;
+        let mut co: Vec<EntityId> = Vec::new();
+        for id in &item.co_owners {
+            if Some(*id) != main && !co.contains(id) && self.entity(*id).is_ok() {
+                co.push(*id);
+            }
+        }
+        if main.is_none() && !co.is_empty() {
+            let first = co.remove(0);
+            name = self.entity(first)?.name;
+            main = Some(first);
+        }
+        Ok((main, name, co))
+    }
+
+    /// Finds the entity `name` means (by name, plate or tax id) or creates one of `kind`
+    /// (guessed when `None`); true when it was created.
+    pub fn find_or_create_entity(&self, name: &str, kind: Option<EntityKind>) -> Result<(EntityId, bool)> {
+        let name = name.trim();
+        if let Ok(id) = name.parse::<i64>()
+            && self.entity(id).is_ok()
+        {
+            return Ok((id, false));
+        }
+        if let Some(e) = entity::find(&self.entities()?, name) {
+            return Ok((e.id, false));
+        }
+        Ok((self.insert_entity(&Entity::new(kind.unwrap_or_else(|| entity::guess(name, None)), name))?, true))
     }
 
     /// The entity an item's `owner` names: its loaded entity while the name still matches, else
@@ -586,8 +734,8 @@ impl Store {
     pub fn insert_entity(&self, e: &Entity) -> Result<EntityId> {
         let now = now_secs();
         self.conn.execute(
-            "INSERT INTO entities (kind, name, ident, detail, year, country, notes, created, updated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
-            params![e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, if e.created > 0 { e.created } else { now }],
+            "INSERT INTO entities (kind, name, ident, detail, year, country, notes, created, updated, archived) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8, ?9)",
+            params![e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, if e.created > 0 { e.created } else { now }, e.archived as i64],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -598,8 +746,8 @@ impl Store {
         let n = tx.execute(
             // a kind written by a newer version reads as "other": saving keeps it unless changed
             "UPDATE entities SET kind = CASE WHEN ?2 = 'other' AND NOT EXISTS (SELECT 1 FROM json_each(?10) WHERE value = entities.kind) THEN kind ELSE ?2 END,
-               name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9, rev = rev + 1 WHERE id = ?1",
-            params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs(), known_kinds()],
+               name = ?3, ident = ?4, detail = ?5, year = ?6, country = ?7, notes = ?8, updated = ?9, rev = rev + 1, archived = ?11 WHERE id = ?1",
+            params![e.id, e.kind.id(), e.name.trim(), e.ident, e.detail, e.year, e.country, e.notes, now_secs(), known_kinds(), e.archived as i64],
         )?;
         if n == 0 {
             return Err(StoreError::NotFound(e.id));
@@ -617,8 +765,34 @@ impl Store {
         if let Some(sid) = shared.filter(|s| uuid::Uuid::parse_str(s).is_ok()) {
             tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![format!("{UNLINK_PREFIX}{sid}"), id.to_string()])?;
         }
-        tx.execute("UPDATE items SET owner = '', entity_id = NULL WHERE entity_id = ?1", [id])?;
+        // an item with other owners keeps the next one as its main owner
+        let mains: Vec<ItemId> = {
+            let mut st = tx.prepare("SELECT id FROM items WHERE entity_id = ?1")?;
+            st.query_map([id], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?
+        };
+        for item in mains {
+            let next: Option<(EntityId, String)> = tx.query_row("SELECT e.id, e.name FROM item_owners o JOIN entities e ON e.id = o.entity WHERE o.item = ?1 AND o.entity != ?2 ORDER BY o.pos, o.entity LIMIT 1", [item, id], |r| Ok((r.get(0)?, r.get(1)?))).optional()?;
+            let (e, name) = next.map_or((None, String::new()), |(e, n)| (Some(e), n));
+            tx.execute("UPDATE items SET entity_id = ?2, owner = ?3 WHERE id = ?1", params![item, e, name])?;
+        }
         tx.execute("DELETE FROM entities WHERE id = ?1", [id])?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Merges entity `from` into `into` (the same person or company entered twice): its items,
+    /// co-ownerships and links move over, then `from` is deleted.
+    pub fn merge_entity(&self, from: EntityId, into: EntityId) -> Result<()> {
+        if from == into {
+            return Err(StoreError::SelfRelation);
+        }
+        self.entity(into)?;
+        let e = self.entity(from)?;
+        let tx = self.conn.unchecked_transaction()?;
+        if let Some(sid) = e.shared.filter(|s| uuid::Uuid::parse_str(s).is_ok()) {
+            tx.execute("INSERT INTO meta (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value", params![format!("{UNLINK_PREFIX}{sid}"), from.to_string()])?;
+        }
+        merge_into(&tx, from, into)?;
         tx.commit()?;
         Ok(())
     }
@@ -1022,6 +1196,105 @@ mod tests {
         ana.kind = EntityKind::Other;
         s.update_entity(&ana).unwrap();
         assert_eq!(kind(2), EntityKind::Other);
+    }
+
+    /// A version-5 file: single owners become `item_owners` rows, digital twins made by the old
+    /// "New, as Digital" flow merge into the person or company of the same name, and a
+    /// company filed as digital becomes a company. Nothing else changes.
+    #[test]
+    fn version_6_owners_and_digital_twins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v5.db");
+        {
+            let mut c = Connection::open(&path).unwrap();
+            c.pragma_update(None, "application_id", APPLICATION_ID).unwrap();
+            let tx = c.transaction().unwrap();
+            for step in &MIGRATIONS[..5] {
+                tx.execute_batch(step).unwrap();
+            }
+            tx.pragma_update(None, "user_version", 5).unwrap();
+            tx.commit().unwrap();
+            for (id, kind, name, notes, shared) in [(1, "person", "Juan", "", None), (2, "digital", "juan", "", None), (3, "digital", "Otherwise SAS", "", None), (4, "digital", "Google account", "", None), (5, "digital", "vcity.io", "", None), (6, "company", "Acme LLC", "", None), (7, "digital", "Acme LLC", "keep me", None), (8, "digital", "Ana", "", Some("u-1")), (9, "person", "Ana", "", None)] {
+                c.execute("INSERT INTO entities (id, kind, name, notes, shared_id) VALUES (?1, ?2, ?3, ?4, ?5)", params![id, kind, name, notes, shared]).unwrap();
+            }
+            c.execute("INSERT INTO relations (from_id, to_id, role) VALUES (2, 3, 'owner'), (1, 3, 'member'), (2, 1, 'family')", []).unwrap();
+            c.execute("INSERT INTO meta (key, value) VALUES ('live_ics:2', '/tmp/juan.ics')", []).unwrap();
+            for (id, kind, name, host, ent) in [(1, "domain", "juan.dev", "", Some(2)), (2, "domain", "vcity.io", "", Some(5)), (3, "domain", "Main site", "", Some(3)), (4, "passport", "Pasaporte", "", Some(1)), (5, "domain", "example.org", "example.org", None), (6, "subscription", "Drive", "", Some(4)), (7, "domain", "acme.com", "", Some(7))] {
+                let owner: String = ent.map(|e| c.query_row("SELECT name FROM entities WHERE id = ?1", [e], |r| r.get(0)).unwrap()).unwrap_or_default();
+                c.execute("INSERT INTO items (id, kind, name, owner, category, host, entity_id) VALUES (?1, ?2, ?3, ?4, 'digital', ?5, ?6)", params![id, kind, name, owner, host, ent]).unwrap();
+            }
+        }
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.version().unwrap(), latest_version());
+        let ids: Vec<(i64, EntityKind)> = s.entities().unwrap().iter().map(|e| (e.id, e.kind)).collect();
+        assert!(!ids.iter().any(|(id, _)| *id == 2), "the digital twin of Juan is merged");
+        let kind = |id| s.entity(id).unwrap().kind;
+        assert_eq!(kind(3), EntityKind::Company, "a legal name filed as digital");
+        assert_eq!(kind(4), EntityKind::Digital, "a digital account stays");
+        assert_eq!(kind(5), EntityKind::Digital, "a domain-named one stays");
+        assert_eq!(kind(7), EntityKind::Digital, "described (notes): left alone");
+        assert_eq!(kind(8), EntityKind::Digital, "shared: left alone");
+        let juan_dev = s.item(1).unwrap();
+        assert_eq!((juan_dev.entity, juan_dev.owner.as_str(), juan_dev.host.as_str()), (Some(1), "Juan", "juan.dev"));
+        assert_eq!(s.item(2).unwrap().host, "vcity.io", "the name is the domain");
+        assert_eq!(s.item(3).unwrap().host, "", "not a domain name");
+        assert_eq!(s.item(5).unwrap().host, "example.org");
+        // links move to Juan; one to himself is dropped; the live calendar follows
+        let rels: Vec<(i64, i64, Role)> = s.relations().unwrap().iter().map(|r| (r.from, r.to, r.role)).collect();
+        assert_eq!(rels, vec![(1, 3, Role::Member)], "Juan already had a link to the company");
+        assert_eq!(s.meta("live_ics:1").unwrap().as_deref(), Some("/tmp/juan.ics"));
+        // every owned item has its main owner in item_owners
+        let n: i64 = s.conn.query_row("SELECT COUNT(*) FROM item_owners WHERE pos = 0", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 6);
+        assert_eq!(s.items().unwrap().len(), 7, "no item lost");
+        assert!(s.entities().unwrap().iter().all(|e| !e.archived));
+    }
+
+    #[test]
+    fn several_owners_and_archived_entities() {
+        let dir = tempfile::tempdir().unwrap();
+        let s = Store::create(&dir.path().join("o.db")).unwrap();
+        let ana = s.insert_entity(&Entity::new(EntityKind::Person, "Ana")).unwrap();
+        let luis = s.insert_entity(&Entity::new(EntityKind::Person, "Luis")).unwrap();
+        let co = s.insert_entity(&Entity::new(EntityKind::Company, "Otherwise SAS")).unwrap();
+        let car = s.insert(&Item { owner: "Ana".into(), co_owners: vec![luis, co, luis, ana, 999], ..Item::new(Kind::Soat, "SOAT") }).unwrap();
+        let it = s.item(car).unwrap();
+        assert_eq!((it.entity, it.co_owners.clone()), (Some(ana), vec![luis, co]), "repeats and unknown ids dropped");
+        assert_eq!(it.owner_ids(), vec![ana, luis, co]);
+        assert!(it.owned_by(co) && !it.owned_by(999));
+        assert_eq!(s.items().unwrap()[0].co_owners, vec![luis, co]);
+        // no main owner named: the first other one is
+        let dom = s.insert(&Item { co_owners: vec![co], ..Item::new(Kind::Domain, "otherwise.co") }).unwrap();
+        assert_eq!((s.item(dom).unwrap().entity, s.item(dom).unwrap().owner.as_str()), (Some(co), "Otherwise SAS"));
+        // deleting the main owner hands the item to the next one
+        s.delete_entity(ana).unwrap();
+        let it = s.item(car).unwrap();
+        assert_eq!((it.entity, it.owner.as_str(), it.co_owners.clone()), (Some(luis), "Luis", vec![co]));
+        s.delete_entity(co).unwrap();
+        let d = s.item(dom).unwrap();
+        assert_eq!((d.entity, d.owner.as_str()), (None, ""));
+        assert_eq!(s.item(car).unwrap().co_owners, Vec::<EntityId>::new());
+        let mut l = s.entity(luis).unwrap();
+        l.archived = true;
+        s.update_entity(&l).unwrap();
+        assert!(s.entity(luis).unwrap().archived);
+        // merging moves items and co-ownerships
+        let twin = s.insert_entity(&Entity::new(EntityKind::Digital, "luis")).unwrap();
+        let sub = s.insert(&Item { owner: "Luis".into(), entity: Some(luis), co_owners: vec![twin], ..Item::new(Kind::Subscription, "Drive") }).unwrap();
+        let other = s.insert(&Item { owner: "luis".into(), entity: Some(twin), ..Item::new(Kind::Subscription, "Music") }).unwrap();
+        s.merge_entity(twin, luis).unwrap();
+        assert_eq!(s.item(sub).unwrap().owner_ids(), vec![luis]);
+        assert_eq!((s.item(other).unwrap().entity, s.item(other).unwrap().owner.as_str()), (Some(luis), "Luis"));
+        assert!(matches!(s.entity(twin), Err(StoreError::NotFound(_))));
+        assert!(matches!(s.merge_entity(luis, luis), Err(StoreError::SelfRelation)));
+        // undo a renewal
+        let before = s.item(sub).unwrap();
+        let mut st = Store::open(s.path()).unwrap();
+        st.renew(sub, date::ymd(2030, 1, 1).unwrap(), date::ymd(2026, 11, 24).unwrap(), Some(5.), "").unwrap();
+        let rid = st.renewals(sub).unwrap()[0].id;
+        st.undo_renewal(rid, &before).unwrap();
+        assert!(st.renewals(sub).unwrap().is_empty());
+        assert_eq!(st.item(sub).unwrap().expires, before.expires);
     }
 
     #[test]

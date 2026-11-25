@@ -127,7 +127,7 @@ impl VigiaApp {
     pub fn ask_delete_entity(&mut self, id: EntityId, cx: &mut Context<Self>) {
         let d = self.data.read(cx);
         let Some(e) = d.entity(id) else { return };
-        let items = d.items.iter().filter(|i| i.entity == Some(id)).count();
+        let items = d.items.iter().filter(|i| i.entity == Some(id) && i.co_owners.is_empty()).count();
         self.dialog = Some(Dialog::DeleteEntity { id, name: e.name.clone(), items });
         cx.notify();
     }
@@ -146,7 +146,7 @@ impl VigiaApp {
                         this.data.update(cx, |d, cx| d.set_live_ics(id, Some(p.clone()), cx));
                         return this.toast(i18n::t!("app.entity.live_ics_on", file = p.display()), cx);
                     }
-                    let items: Vec<Item> = this.data.read(cx).items.iter().filter(|i| i.entity == Some(id)).cloned().collect();
+                    let items: Vec<Item> = this.data.read(cx).items.iter().filter(|i| i.owned_by(id)).cloned().collect();
                     let text = vigia_core::ics::export(&items, Data::today(), vigia_core::db::now_secs());
                     match std::fs::write(&p, text) {
                         Ok(()) => this.toast(i18n::t!("app.export.done", file = p.display()), cx),
@@ -165,7 +165,16 @@ impl VigiaApp {
         let Some(e) = d.entity(id).cloned() else { return div().into_any_element() };
         let all = d.entities.clone();
         let rels: Vec<_> = d.relations.iter().filter(|r| r.from == id || r.to == id).cloned().collect();
-        let items: Vec<Item> = d.items.iter().filter(|i| i.entity == Some(id)).cloned().collect();
+        let items: Vec<Item> = d.items.iter().filter(|i| i.owned_by(id)).cloned().collect();
+        // what it holds through what it owns (a person's company, the company's car)
+        let through: Vec<(Ent, Vec<Item>)> = vigia_core::entity::owned_through(id, &d.relations)
+            .into_iter()
+            .filter_map(|o| {
+                let e = d.entity(o)?.clone();
+                let v: Vec<Item> = d.items.iter().filter(|i| i.owned_by(o) && !i.owned_by(id)).cloned().collect();
+                (!v.is_empty()).then_some((e, v))
+            })
+            .collect();
         let files: Vec<(String, vigia_core::model::Attachment)> = d.store.as_ref().map(|s| items.iter().flat_map(|i| s.attachments(i.id).unwrap_or_default().into_iter().map(|a| (i.name.clone(), a))).collect()).unwrap_or_default();
         let mut history: Vec<(String, vigia_core::model::Renewal)> = d.store.as_ref().map(|s| items.iter().flat_map(|i| s.renewals(i.id).unwrap_or_default().into_iter().map(|r| (i.name.clone(), r))).collect()).unwrap_or_default();
         history.sort_by_key(|h| std::cmp::Reverse(h.1.on));
@@ -174,8 +183,9 @@ impl VigiaApp {
 
         let weak = cx.entity().downgrade();
         let live = d.live_ics.iter().find(|(e, _)| *e == id).map(|(_, p)| p.display().to_string());
+        let archived = e.archived;
         let more = Button::new("ent-more").ghost().small().icon(IconName::Ellipsis).dropdown_menu_with_anchor(Anchor::TopRight, move |menu, _, _| {
-            let (w1, w2, w3) = (weak.clone(), weak.clone(), weak.clone());
+            let (w1, w2, w3, w4) = (weak.clone(), weak.clone(), weak.clone(), weak.clone());
             let live_item = match &live {
                 Some(p) => PopupMenuItem::new(i18n::t!("app.entity.live_ics_stop", file = p.clone())).on_click(move |_, _, cx| {
                     w3.update(cx, |this, cx| this.data.update(cx, |d, cx| d.set_live_ics(id, None, cx))).ok();
@@ -189,6 +199,16 @@ impl VigiaApp {
             }))
             .item(live_item)
             .separator()
+            .item(PopupMenuItem::new(if archived { i18n::t!("app.entity.unarchive") } else { i18n::t!("app.entity.archive") }).on_click(move |_, _, cx| {
+                w4.update(cx, |this, cx| {
+                    let Some(mut e) = this.data.read(cx).entity(id).cloned() else { return };
+                    e.archived = !archived;
+                    if let Err(err) = this.data.update(cx, |d, cx| d.save_entity(e, cx)) {
+                        this.toast(err, cx);
+                    }
+                })
+                .ok();
+            }))
             .item(PopupMenuItem::new(i18n::t!("app.entity.delete")).on_click(move |_, _, cx| {
                 w2.update(cx, |this, cx| this.ask_delete_entity(id, cx)).ok();
             }))
@@ -214,7 +234,7 @@ impl VigiaApp {
             .items_center()
             .gap(px(12.))
             .child(div().flex().items_center().justify_center().size(px(44.)).rounded_full().border_2().border_color(worst.map(|s| t.status(s)).unwrap_or(t.border)).bg(t.surface).child(ui::entity_icon(e.kind, 22., t.accent)))
-            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).child(div().flex().gap(px(6.)).child(ui::chip(e.kind.label(), t.accent, 11.5)).child(ui::chip(i18n::tn!("app.items.count", live.len()), t.ink_muted, 11.5))))
+            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).child(div().flex().gap(px(6.)).child(ui::chip(e.kind.label(), t.accent, 11.5)).child(ui::chip(i18n::tn!("app.items.count", live.len()), t.ink_muted, 11.5)).when(e.archived, |d| d.child(ui::chip(i18n::t!("app.state.archived"), t.ink_muted, 11.5)))))
             .child(ui::outline_button(t, "ent-new").child(icon(IconName::Plus, 14., t.ink)).child(i18n::t!("app.entity.add_item")).on_click(cx.listener(move |this, _, window, cx| {
                 let e = this.data.read(cx).entity(id).cloned();
                 this.start_new_for(e.as_ref(), window, cx);
@@ -246,7 +266,7 @@ impl VigiaApp {
         // links to other entities
         let weak = cx.entity().downgrade();
         let me_kind = e.kind;
-        let others: Vec<Ent> = all.iter().filter(|o| o.id != id && !rels.iter().any(|r| r.from == o.id || r.to == o.id)).cloned().collect();
+        let others: Vec<Ent> = all.iter().filter(|o| o.id != id && !o.archived && !rels.iter().any(|r| r.from == o.id || r.to == o.id)).cloned().collect();
         let add_link = Button::new("ent-link").outline().xsmall().icon(IconName::Plus).label(i18n::t!("app.entity.link")).dropdown_menu(move |mut menu, _, _| {
             for k in EntityKind::ALL {
                 let of: Vec<&Ent> = others.iter().filter(|o| o.kind == k).collect();
@@ -315,6 +335,24 @@ impl VigiaApp {
         }
         for (k, it) in vigia_core::view::sorted(items.iter(), today).into_iter().enumerate() {
             col = col.child(self.item_row(t, it, today, ("ent-item", k), cx));
+        }
+        for (j, (o, v)) in through.iter().enumerate() {
+            let oid = o.id;
+            col = col.child(
+                div()
+                    .id(("ent-through", j))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .pt(px(8.))
+                    .cursor_pointer()
+                    .child(ui::entity_icon(o.kind, 12., t.ink_muted))
+                    .child(ui::section_title(t, i18n::t!("app.entity.through", name = o.name)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.open_entity(oid, cx))),
+            );
+            for (k, it) in vigia_core::view::sorted(v.iter(), today).into_iter().enumerate() {
+                col = col.child(self.item_row(t, it, today, ("ent-through-item", j * 1000 + k), cx));
+            }
         }
 
         // coming deadlines, by month

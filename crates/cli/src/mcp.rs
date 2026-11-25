@@ -39,16 +39,27 @@ struct Tool {
 const TOOLS: &[Tool] = &[
     Tool { name: "summary", description: "What needs attention: counts per status (expired, soon = within 30 days, upcoming, ok, undated), the next deadlines, and automatic domain / certificate checks that are failing.", schema: || json!({"type": "object", "properties": {}}), write: false }, // i18n-ok: for agents
     Tool { name: "checks", description: "Domains and TLS certificates: host, expiry, days left, whether the automatic check (RDAP / TLS) is on, when it last ran and its last result (check_note). failing_only lists those whose last check failed.", schema: || json!({"type": "object", "properties": {"failing_only": {"type": "boolean"}}}), write: false }, // i18n-ok: for agents
-    Tool { name: "entity", description: "One owner (person, vehicle, company, property, pet, digital asset) by id, name or plate / tax id: its items, most urgent first, and its relations to other entities.", schema: || json!({"type": "object", "properties": {"owner": {"type": "string"}}, "required": ["owner"]}), write: false }, // i18n-ok: for agents
-    Tool { name: "list_items", description: "Items, most urgent first. Filters: query (text), status (expired|soon|upcoming|ok|undated), category, owner (entity name, plate or id), include_archived.", schema: || json!({"type": "object", "properties": {"query": {"type": "string"}, "status": {"type": "string", "enum": ["expired", "soon", "upcoming", "ok", "undated"]}, "category": {"type": "string"}, "owner": {"type": "string"}, "include_archived": {"type": "boolean"}}}), write: false }, // i18n-ok: for agents
+    Tool { name: "entity", description: "One owner (person, vehicle, company, property, pet, digital asset) by id, name or plate / tax id: its items (also those it has through what it owns, with via), owned_by, owns, and its relations.", schema: || json!({"type": "object", "properties": {"owner": {"type": "string"}}, "required": ["owner"]}), write: false }, // i18n-ok: for agents
+    Tool { name: "list_items", description: "Items, most urgent first. Filters: query (text), status (expired|soon|upcoming|ok|undated), category, owner (entity name, plate or id; includes what it owns through companies it owns), include_archived.", schema: || json!({"type": "object", "properties": {"query": {"type": "string"}, "status": {"type": "string", "enum": ["expired", "soon", "upcoming", "ok", "undated"]}, "category": {"type": "string"}, "owner": {"type": "string"}, "include_archived": {"type": "boolean"}}}), write: false }, // i18n-ok: for agents
     Tool { name: "due", description: "Items overdue or due within `days` (default 30), most urgent first.", schema: || json!({"type": "object", "properties": {"days": {"type": "integer", "minimum": 0}}}), write: false }, // i18n-ok: for agents
     Tool { name: "entities", description: "Who or what items belong to (person, vehicle, company, property, pet, digital, other), with item counts and their shared registry id when synced.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string"}}}), write: false }, // i18n-ok: for agents
     Tool { name: "item", description: "One item with its renewal history and attachments.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}}, "required": ["id"]}), write: false }, // i18n-ok: for agents
-    Tool { name: "entities_by_kind", description: "The app's sections: owners grouped by kind (vehicle, pet, person, company, property, digital, other), each with its next deadline, its status (worst among its items) and the ids of suggested templates it doesn't have yet. People's document numbers show only their last 4 characters.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}}}), write: false }, // i18n-ok: for agents
+    Tool { name: "entities_by_kind", description: "The app's sections: owners grouped by kind (vehicle, pet, person, company, property, digital, other), each with its next deadline, its status (worst among its items) and the ids of suggested templates it doesn't have yet; items lists the section's items no owner of that kind holds (a company's domains under digital). People's document numbers show only their last 4 characters.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}}}), write: false }, // i18n-ok: for agents
     Tool { name: "templates", description: "Suggested reminders per kind of owner (SOAT, técnico-mecánica, pet vaccines, passport, Cámara de Comercio, predial…): id, label, the kinds it is for, item kind, category, suggested recurrence and lead days. Templates never carry a date: ask the user for the real one. Use an id with propose_add_from_template.", schema: || json!({"type": "object", "properties": {"kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}}}), write: false }, // i18n-ok: for agents
     Tool { name: "add_item", description: "Add an item: `text` is a quick-add line (\"Pasaporte @Ana 12/05/2031\"); kind, name, owner, expires (YYYY-MM-DD), host, notes override it.", schema: || json!({"type": "object", "properties": {"text": {"type": "string"}, "kind": {"type": "string"}, "name": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "host": {"type": "string"}, "notes": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}}), write: true }, // i18n-ok: for agents
     Tool { name: "renew_item", description: "Record a renewal: the new expiry (default: the suggested next one), optional cost and note. The old date stays in the history.", schema: || json!({"type": "object", "properties": {"id": {"type": "integer"}, "expires": {"type": "string"}, "cost": {"type": "number"}, "note": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["id"]}), write: true }, // i18n-ok: for agents
     Tool { name: "propose_add_from_template", description: "Add a reminder from a template (see the templates tool), e.g. \"recuérdame el SOAT del carro\" → template soat. owner: an entity's id, name, plate or tax id (left out: the only entity of the template's kind; an unknown name becomes a new entity of that kind). expires (YYYY-MM-DD) only when the user said the real date; never guess official dates.", schema: || json!({"type": "object", "properties": {"template": {"type": "string"}, "owner": {"type": "string"}, "expires": {"type": "string"}, "name": {"type": "string"}, "notes": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["template"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "update_items", description: "Change items (ids); only the fields given change. owners replaces who they belong to (names or ids; unknown names become new entities), add_owners / remove_owners adjust it. Fields: name, kind, category, issued, expires (YYYY-MM-DD, null clears), recurrence (none, every:1y, yearly:03-31), lead_days, cost, currency, provider, reference, renewal_url, tags, auto_renews, notes, host, auto_check, state (active, in_progress, archived), snoozed_until, business_days.", schema: || json!({"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "integer"}}, "owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "add_owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "remove_owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "owner_kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}, "name": {"type": "string"}, "kind": {"type": "string"}, "category": {"type": "string"}, "issued": {"type": ["string", "null"]}, "expires": {"type": ["string", "null"]}, "recurrence": {"type": "string"}, "lead_days": {"type": "array", "items": {"type": "integer"}}, "cost": {"type": ["number", "null"]}, "currency": {"type": "string"}, "provider": {"type": "string"}, "reference": {"type": "string"}, "renewal_url": {"type": "string"}, "tags": {"type": "array", "items": {"type": "string"}}, "auto_renews": {"type": "boolean"}, "notes": {"type": "string"}, "host": {"type": "string"}, "auto_check": {"type": "boolean"}, "state": {"type": "string", "enum": ["active", "in_progress", "archived"]}, "snoozed_until": {"type": ["string", "null"]}, "business_days": {"type": "string"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["ids"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "delete_items", description: "Delete items (ids) with their history and files; can't be undone. Prefer update_items with state archived.", schema: || json!({"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "integer"}}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["ids"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "convert_celebrations", description: "Make items (ids) yearly birthdays or anniversaries (kind birthday | anniversary, else guessed from the name): their date becomes the day each year; a past year is kept to count the age.", schema: || json!({"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "integer"}}, "kind": {"type": "string", "enum": ["birthday", "anniversary"]}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["ids"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "check_items", description: "Look up domains (public RDAP) or certificates (TLS) now (ids) and save the expiry found.", schema: || json!({"type": "object", "properties": {"ids": {"type": "array", "items": {"type": "integer"}}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["ids"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "create_entity", description: "Add a person, company, vehicle, pet, property (home), digital asset or other: name, kind (guessed: a legal suffix is a company), ident (plate, tax id, document number), detail, year, country, notes, owners (who owns it: names or ids).", schema: || json!({"type": "object", "properties": {"name": {"type": "string"}, "kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}, "ident": {"type": "string"}, "detail": {"type": "string"}, "year": {"type": "integer"}, "country": {"type": "string"}, "notes": {"type": "string"}, "owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["name"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "update_entity", description: "Change an entity: name, kind, ident, detail, year, country, notes, archived, and who owns it (owners replaces, add_owners / remove_owners adjust).", schema: || json!({"type": "object", "properties": {"entity": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "name": {"type": "string"}, "kind": {"type": "string", "enum": ["person", "vehicle", "company", "property", "pet", "digital", "other"]}, "ident": {"type": "string"}, "detail": {"type": "string"}, "year": {"type": "integer"}, "country": {"type": "string"}, "notes": {"type": "string"}, "archived": {"type": "boolean"}, "owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "add_owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "remove_owners": {"type": ["array", "string"], "items": {"type": ["string", "integer"]}}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["entity"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "archive_entity", description: "Archive an entity (archived false restores it): it leaves the sidebar and sections; its items and links stay.", schema: || json!({"type": "object", "properties": {"entity": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "archived": {"type": "boolean"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["entity"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "delete_entity", description: "Delete an entity and its links; its items stay, with their other owners or none. Can't be undone.", schema: || json!({"type": "object", "properties": {"entity": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["entity"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "merge_entities", description: "Merge a duplicate entity (from) into another (into): its items, co-ownerships and links move, then it is deleted.", schema: || json!({"type": "object", "properties": {"from": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "into": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["from", "into"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "relate", description: "Link two entities: from is role of to (Juan owner of Otherwise SAS; a company owner of a car). Linking again changes the role.", schema: || json!({"type": "object", "properties": {"from": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "to": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "role": {"type": "string", "enum": ["owner", "member", "manager", "family", "uses", "other"]}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["from", "to"]}), write: true }, // i18n-ok: for agents
+    Tool { name: "unrelate", description: "Remove the link between two entities.", schema: || json!({"type": "object", "properties": {"from": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "to": {"type": ["string", "integer"], "description": "id, name, plate or tax id"}, "reason": {"type": "string", "description": "proposals: one short sentence for the user"}}, "required": ["from", "to"]}), write: true }, // i18n-ok: for agents
 ];
 
 /// An item for the agent: identity documents show only the last 4 characters of their number.
@@ -129,22 +140,40 @@ impl Server {
         let items = s.items().map_err(|e| e.to_string())?;
         let list = |v: Vec<&Item>| json!({"count": v.len(), "items": v.iter().map(|i| item_out(i, today)).collect::<Vec<_>>()});
         let order = date::order_for(i18n::locale());
-        if !self.writes
-            && let Some(dir) = &self.propose
-            && vigia_core::agent::WRITE_TOOLS.contains(&name)
-        {
-            let preview = match name {
-                "add_item" => item_out(&vigia_core::agent::item_from_args(a, today, order)?, today),
-                "propose_add_from_template" => item_out(&vigia_core::agent::item_from_template_args(a, &s.entities().map_err(|e| e.to_string())?, today, order)?, today),
-                _ => {
-                    let it = s.item(vigia_core::agent::needs_id(a)?).map_err(|e| e.to_string())?;
-                    let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
-                    json!({"item": item_out(&it, today), "new_expiry": date::iso(r.expires), "cost": r.cost, "note": r.note})
+        if vigia_core::agent::WRITE_TOOLS.contains(&name) {
+            let entities = s.entities().map_err(|e| e.to_string())?;
+            let relations = s.relations().map_err(|e| e.to_string())?;
+            let snap = vigia_core::agent::Snapshot { items: &items, entities: &entities, relations: &relations };
+            let plan = vigia_core::agent::plan(name, a, &snap, today, order)?;
+            if !self.writes && let Some(dir) = &self.propose {
+                let p = vigia_core::agent::Proposal { tool: name.to_string(), args: a.clone(), reason: str_arg("reason").unwrap_or_default().to_string() };
+                vigia_core::agent::deliver(dir, &p).map_err(|e| e.to_string())?;
+                let preview = match plan.ops.first() {
+                    Some(vigia_core::agent::Op::AddItem { item, .. }) => item_out(item, today),
+                    Some(vigia_core::agent::Op::Renew(r)) => json!({"item": items.iter().find(|i| i.id == r.id).map(|i| item_out(i, today)), "new_expiry": date::iso(r.expires), "cost": r.cost, "note": r.note}),
+                    _ => Value::Null,
+                };
+                return Ok(json!({"status": "awaiting_approval", "title": plan.title, "changes": plan.lines, "undoable": plan.undoable, "preview": preview, "message": "Shown to the user as a card in Vigía; it is saved only if they accept it."})); // i18n-ok: for agents
+            }
+            let mut s = s;
+            let done = vigia_core::agent::apply(&mut s, &plan, today).map_err(|e| e.to_string())?;
+            for id in &plan.check {
+                if let Ok(mut it) = s.item(*id) {
+                    let o = vigia_core::checks::run(&it, &vigia_core::checks::Net);
+                    vigia_core::checks::apply(&mut it, &o, vigia_core::db::now_secs());
+                    s.update(&it).map_err(|e| e.to_string())?;
                 }
-            };
-            let p = vigia_core::agent::Proposal { tool: name.to_string(), args: a.clone(), reason: str_arg("reason").unwrap_or_default().to_string() };
-            vigia_core::agent::deliver(dir, &p).map_err(|e| e.to_string())?;
-            return Ok(json!({"status": "awaiting_approval", "preview": preview, "message": "Shown to the user as a card in Vigía; it is saved only if they accept it."})); // i18n-ok: for agents
+            }
+            self.republish(&s);
+            let items = s.items().map_err(|e| e.to_string())?;
+            let touched: Vec<Value> = items.iter().filter(|i| done.items.contains(&i.id)).map(|i| item_out(i, today)).collect();
+            let entities = s.entities().map_err(|e| e.to_string())?;
+            let ents: Vec<Value> = entities.iter().filter(|e| done.entities.contains(&e.id)).map(|e| entity_out(e, &items)).collect();
+            // the single item an add / renew made, as before
+            if matches!(name, "add_item" | "renew_item" | "propose_add_from_template") && touched.len() == 1 {
+                return Ok(touched[0].clone());
+            }
+            return Ok(json!({"status": "saved", "title": plan.title, "items": touched, "entities": ents}));
         }
         match name {
             "summary" => {
@@ -171,16 +200,33 @@ impl Server {
                 let o = str_arg("owner").ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
                 let e = o.parse::<i64>().ok().and_then(|id| entities.iter().find(|e| e.id == id)).or_else(|| vigia_core::entity::find(&entities, o)).ok_or_else(|| format!("no entity {o:?}; see the entities tool"))?; // i18n-ok: for agents
                 let mut v = entity_out(e, &items);
-                v["items"] = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today).iter().map(|i| item_out(i, today)).collect();
+                let rels = s.relations().map_err(|e| e.to_string())?;
+                let f = Filter::for_entity(e.id, &rels);
+                let name_of_e = |id: i64| entities.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
+                // its own items, then those it has through what it owns ("via")
+                v["items"] = view::filtered(&items, &Filter { show_archived: true, ..f.clone() }, today)
+                    .iter()
+                    .map(|i| {
+                        let mut j = item_out(i, today);
+                        if let Some(Some(via)) = view::via(i, e.id, &f.through) {
+                            j["via"] = json!({"id": via, "name": name_of_e(via)});
+                        }
+                        j
+                    })
+                    .collect();
+                v["owned_by"] = vigia_core::entity::owners_of(e.id, &rels).into_iter().map(|o| json!({"id": o, "name": name_of_e(o)})).collect();
+                v["owns"] = rels.iter().filter(|r| r.from == e.id && r.role == vigia_core::entity::Role::Owner).map(|r| json!({"id": r.to, "name": name_of_e(r.to)})).collect();
                 let name_of = |id: i64| entities.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
                 v["relations"] = s.relations().map_err(|e| e.to_string())?.iter().filter(|r| r.from == e.id || r.to == e.id).map(|r| json!({"from": r.from, "from_name": name_of(r.from), "to": r.to, "to_name": name_of(r.to), "role": r.role.id()})).collect();
                 Ok(v)
             }
             "list_items" => {
                 let entities = s.entities().map_err(|e| e.to_string())?;
+                let owner = str_arg("owner").map(|o| o.parse::<i64>().ok().filter(|id| entities.iter().any(|e| e.id == *id)).or_else(|| vigia_core::entity::find(&entities, o).map(|e| e.id)).unwrap_or(-1));
                 let f = Filter {
                     query: str_arg("query").unwrap_or_default().to_string(),
-                    entity: str_arg("owner").map(|o| o.parse::<i64>().ok().filter(|id| entities.iter().any(|e| e.id == *id)).or_else(|| vigia_core::entity::find(&entities, o).map(|e| e.id)).unwrap_or(-1)),
+                    through: owner.map(|o| vigia_core::entity::owned_through(o, &s.relations().unwrap_or_default())).unwrap_or_default(),
+                    entity: owner,
                     entity_kind: None,
                     category: str_arg("category").map(|c| Category::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_category", value = c))).transpose()?,
                     status: str_arg("status").map(|c| Status::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_status", value = c))).transpose()?,
@@ -207,11 +253,12 @@ impl Server {
                         let cards: Vec<Value> = view::cards(&entities, &items, k, today)
                             .iter()
                             .map(|c| {
-                                let own: Vec<&Item> = items.iter().filter(|i| i.entity == Some(c.entity.id) && i.state != vigia_core::model::State::Archived).collect();
+                                let own: Vec<&Item> = items.iter().filter(|i| i.owned_by(c.entity.id) && i.state != vigia_core::model::State::Archived).collect();
                                 json!({"id": c.entity.id, "name": c.entity.name, "ident": c.entity.shown_ident(), "detail": c.entity.detail, "items": c.items, "status": c.status.map(|s| s.id()), "next": c.next.map(|i| item_out(i, today)), "missing_templates": vigia_core::templates::missing(k, &own).iter().map(|t| t.id).collect::<Vec<_>>()})
                             })
                             .collect();
-                        json!({"kind": k.id(), "label": k.label(), "count": cards.len(), "entities": cards})
+                        let loose: Vec<Value> = view::loose(&items, &entities, k, today).into_iter().map(|i| item_out(i, today)).collect();
+                        json!({"kind": k.id(), "label": k.label(), "count": cards.len(), "entities": cards, "items": loose})
                     })
                     .collect();
                 Ok(json!({"sections": sections}))
@@ -227,12 +274,6 @@ impl Server {
                 .collect();
                 Ok(json!({"count": v.len(), "templates": v}))
             }
-            "propose_add_from_template" => {
-                let it = vigia_core::agent::item_from_template_args(a, &s.entities().map_err(|e| e.to_string())?, today, order)?;
-                let id = s.insert(&it).map_err(|e| e.to_string())?;
-                self.republish(&s);
-                Ok(item_out(&s.item(id).map_err(|e| e.to_string())?, today))
-            }
             "item" => {
                 let id = a.get("id").and_then(Value::as_i64).ok_or_else(|| i18n::t!("cli.err.needs_id"))?;
                 let it = s.item(id).map_err(|e| e.to_string())?;
@@ -241,20 +282,6 @@ impl Server {
                 v["attachments"] = s.attachments(id).map_err(|e| e.to_string())?.iter().map(|f| json!({"name": f.name, "path": s.attachment_path(f).display().to_string()})).collect();
                 v["link"] = json!(vigia_core::links::item_link(id).to_url());
                 Ok(v)
-            }
-            "add_item" => {
-                let it = vigia_core::agent::item_from_args(a, today, order)?;
-                let id = s.insert(&it).map_err(|e| e.to_string())?;
-                self.republish(&s);
-                Ok(item_out(&s.item(id).map_err(|e| e.to_string())?, today))
-            }
-            "renew_item" => {
-                let mut s = s;
-                let it = s.item(vigia_core::agent::needs_id(a)?).map_err(|e| e.to_string())?;
-                let r = vigia_core::agent::renewal_from_args(&it, a, today, order)?;
-                let it = s.renew(r.id, r.expires, today, r.cost, &r.note).map_err(|e| e.to_string())?;
-                self.republish(&s);
-                Ok(item_out(&it, today))
             }
             _ => Err(format!("unknown tool {name:?}")), // i18n-ok: protocol
         }
@@ -458,4 +485,35 @@ mod tests {
         let e = call(&mut srv, "entity", json!({"owner": "ABC123"}));
         assert_eq!(e["items"][0]["kind"], "soat");
     }
+
+    #[test]
+    fn entity_and_item_tools_propose_or_write() {
+        let (d, p) = db();
+        let dir = d.path().join("proposals");
+        let call = |srv: &mut Server, name: &str, args: Value| srv.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": name, "arguments": args}})).unwrap()["result"].clone();
+        let mut srv = Server { db: p.clone(), writes: false, publish: false, propose: Some(dir.clone()) };
+        let list = srv.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})).unwrap();
+        let names: Vec<String> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap().to_string()).collect();
+        for t in vigia_core::agent::WRITE_TOOLS {
+            assert!(names.iter().any(|n| n == t), "{t} offered");
+        }
+        assert!(list["result"]["tools"].as_array().unwrap().iter().all(|t| t["description"].as_str().unwrap().len() < 700), "short descriptions");
+        let r = call(&mut srv, "create_entity", json!({"name": "Otherwise SAS"}));
+        assert_eq!(r["structuredContent"]["status"], "awaiting_approval");
+        let r = call(&mut srv, "update_items", json!({"ids": [2], "owners": ["Otherwise SAS"]}));
+        assert!(r["structuredContent"]["changes"][0].as_str().unwrap().contains("Otherwise SAS"));
+        assert_eq!(call(&mut srv, "update_items", json!({"ids": [42], "cost": 1}))["isError"], true);
+        assert_eq!(call(&mut srv, "delete_items", json!({"ids": [1]}))["structuredContent"]["undoable"], false);
+        let s = Store::open(&p).unwrap();
+        assert_eq!((s.entities().unwrap().len(), s.items().unwrap().len()), (1, 2), "nothing written");
+        assert_eq!(vigia_core::agent::collect(&dir).len(), 3);
+        let mut srv = Server { db: p.clone(), writes: true, publish: false, propose: None };
+        assert_eq!(call(&mut srv, "create_entity", json!({"name": "Otherwise SAS"}))["structuredContent"]["entities"][0]["kind"], "company");
+        let r = call(&mut srv, "update_items", json!({"ids": [2], "owners": ["Otherwise SAS"], "provider": "Namecheap"}));
+        assert_eq!(r["structuredContent"]["items"][0]["owner"], "Otherwise SAS");
+        assert_eq!(r["structuredContent"]["items"][0]["provider"], "Namecheap");
+        let e = call(&mut srv, "entity", json!({"owner": "Otherwise SAS"}));
+        assert_eq!(e["structuredContent"]["items"][0]["name"], "otherwisetech.com");
+    }
 }
+

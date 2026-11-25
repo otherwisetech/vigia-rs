@@ -54,12 +54,12 @@ fn layer(k: EntityKind) -> usize {
     }
 }
 
-/// Builds the graph of `entities`, `relations` and (when `show_items`) the items that belong to
-/// an entity and aren't archived.
+/// Builds the graph of `entities` (not archived), `relations` and (when `show_items`) the
+/// items that belong to one of them and aren't archived, with an edge from each owner.
 pub fn build(entities: &[Entity], relations: &[Relation], items: &[Item], show_items: bool, layout: Layout) -> Graph {
-    let mut ents: Vec<&Entity> = entities.iter().collect();
+    let mut ents: Vec<&Entity> = entities.iter().filter(|e| !e.archived).collect();
     ents.sort_by_key(|e| (layer(e.kind), e.kind, e.name.to_lowercase(), e.id));
-    let mut its: Vec<&Item> = if show_items { items.iter().filter(|i| i.state != State::Archived && i.entity.is_some_and(|e| entities.iter().any(|x| x.id == e))).collect() } else { Vec::new() };
+    let mut its: Vec<&Item> = if show_items { items.iter().filter(|i| i.state != State::Archived && i.owner_ids().into_iter().any(|e| ents.iter().any(|x| x.id == e))).collect() } else { Vec::new() };
     its.sort_by_key(|i| (i.entity, i.name.to_lowercase(), i.id));
     let mut nodes: Vec<Node> = ents.iter().map(|e| Node { r: NodeRef::Entity(e.id), x: 0., y: 0. }).chain(its.iter().map(|i| Node { r: NodeRef::Item(i.id), x: 0., y: 0. })).collect();
     let index: HashMap<NodeRef, usize> = nodes.iter().enumerate().map(|(k, n)| (n.r, k)).collect();
@@ -70,8 +70,11 @@ pub fn build(entities: &[Entity], relations: &[Relation], items: &[Item], show_i
         .filter_map(|r| Some(Edge { from: *index.get(&NodeRef::Entity(r.from))?, to: *index.get(&NodeRef::Entity(r.to))?, role: Some(r.role), relation: Some(r.id) }))
         .collect();
     for i in &its {
-        if let (Some(&a), Some(&b)) = (index.get(&NodeRef::Item(i.id)), i.entity.and_then(|e| index.get(&NodeRef::Entity(e)))) {
-            edges.push(Edge { from: b, to: a, role: None, relation: None });
+        let Some(&a) = index.get(&NodeRef::Item(i.id)) else { continue };
+        for o in i.owner_ids() {
+            if let Some(&b) = index.get(&NodeRef::Entity(o)) {
+                edges.push(Edge { from: b, to: a, role: None, relation: None });
+            }
         }
     }
     let kinds: Vec<Option<EntityKind>> = nodes.iter().map(|n| if let NodeRef::Entity(id) = n.r { ents.iter().find(|e| e.id == id).map(|e| e.kind) } else { None }).collect();
@@ -264,6 +267,14 @@ mod tests {
         assert_eq!(g.edges.iter().filter(|e| e.role.is_none()).count(), 4);
         let without = build(&e, &r, &i, false, Layout::Layered);
         assert_eq!((without.nodes.len(), without.edges.len()), (6, 4));
+        // a co-owned item has an edge from each owner; archived entities leave the map
+        let mut i2 = i.clone();
+        i2[1].co_owners = vec![1];
+        assert_eq!(build(&e, &r, &i2, true, Layout::Layered).edges.len(), 9);
+        let mut e2 = e.clone();
+        e2[5].archived = true;
+        let g = build(&e2, &r, &i, true, Layout::Layered);
+        assert_eq!((g.nodes.len(), g.edges.len()), (9, 7));
     }
 
     #[test]

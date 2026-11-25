@@ -67,7 +67,8 @@ pub fn apply(item: &mut Item, outcome: &Outcome, now: i64) -> bool {
             }
             item.check_note = match d.expires {
                 Some(e) => i18n::t!("core.check.domain_ok", date = crate::date::iso(e)),
-                None => i18n::t!("core.check.no_expiry"),
+                // some registries answer without publishing the expiry
+                None => i18n::t!("core.check.unsupported"),
             };
         }
         Outcome::Cert(c) => {
@@ -87,9 +88,41 @@ pub fn apply(item: &mut Item, outcome: &Outcome, now: i64) -> bool {
                 None => i18n::t!("core.check.no_expiry"),
             };
         }
+        Outcome::Failed(e) if is_in_any("core.check.no_rdap", e) => item.check_note = i18n::t!("core.check.unsupported"),
         Outcome::Failed(e) => item.check_note = i18n::t!("core.check.failed", detail = e),
     }
     item.expires != before
+}
+
+/// Whether `text` starts like catalog entry `key` in any bundled language.
+fn is_in_any(key: &str, text: &str) -> bool {
+    i18n::available().iter().any(|(lang, _)| {
+        let t = i18n::tr_in(lang, key);
+        let prefix = t.split('{').next().unwrap_or_default().trim();
+        !prefix.is_empty() && text.trim_start().starts_with(prefix)
+    })
+}
+
+/// The registry can't be asked (no RDAP for the TLD, or it doesn't publish the expiry): the
+/// user enters the date by hand.
+pub fn note_is_unsupported(note: &str) -> bool {
+    is_in_any("core.check.unsupported", note)
+}
+
+/// The last check left the item without a date: say so and ask for it.
+pub fn needs_manual(item: &Item) -> bool {
+    item.kind.checkable() && item.last_checked.is_some() && item.expires.is_none() && (note_is_unsupported(&item.check_note) || note_is_failure(&item.check_note))
+}
+
+/// Where the date comes from: `RDAP` for domains, `TLS` for certificates.
+pub fn source(item: &Item) -> &'static str {
+    if item.kind == Kind::Domain { "RDAP" } else { "TLS" } // i18n-ok: protocol names
+}
+
+/// Domains that have a name to look up but no date and were never checked: looked up once
+/// (0.7.0 backfill), whether or not their daily check is on.
+pub fn backfill(items: &[Item]) -> Vec<i64> {
+    items.iter().filter(|i| i.kind == Kind::Domain && i.state != crate::model::State::Archived && i.expires.is_none() && i.last_checked.is_none() && crate::rdap::normalize(&target(i)).is_some()).map(|i| i.id).collect()
 }
 
 /// Whether `note` is a failed check's note, in whichever bundled language it was written.
@@ -151,6 +184,23 @@ mod tests {
         let items = vec![Item { id: 1, last_checked: Some(now - 10), ..d.clone() }, Item { id: 2, last_checked: Some(now - EVERY_SECS), ..d.clone() }, Item { id: 3, last_checked: None, ..d.clone() }, Item { id: 4, auto_check: false, ..d.clone() }, Item { id: 5, auto_check: true, ..Item::new(Kind::Passport, "p") }];
         assert_eq!(due(&items, now), vec![2, 3]);
         assert!(stale(&Item { last_checked: Some(now - 3 * EVERY_SECS), ..d.clone() }, now));
+    }
+
+    #[test]
+    fn unsupported_registries_ask_for_the_date() {
+        let mut io = Item { auto_check: true, host: "vcity.io".into(), ..Item::new(Kind::Domain, "vcity.io") };
+        assert_eq!(backfill(std::slice::from_ref(&io)), vec![0]);
+        apply(&mut io, &Outcome::Failed(i18n::t!("core.check.no_rdap", name = "vcity.io")), 1);
+        assert!(note_is_unsupported(&io.check_note) && needs_manual(&io));
+        assert!(backfill(std::slice::from_ref(&io)).is_empty(), "looked up once");
+        let mut silent = Item::new(Kind::Domain, "example.org");
+        apply(&mut silent, &Outcome::Domain(crate::rdap::DomainInfo::default()), 1);
+        assert!(needs_manual(&silent));
+        let mut ok = Item::new(Kind::Domain, "example.com");
+        apply(&mut ok, &Outcome::Domain(crate::rdap::DomainInfo { expires: ymd(2027, 8, 13), ..Default::default() }), 1);
+        assert!(!needs_manual(&ok) && !note_is_unsupported(&ok.check_note));
+        assert_eq!(source(&ok), "RDAP");
+        assert!(backfill(&[Item::new(Kind::Domain, "Main site"), Item { expires: ymd(2027, 1, 1), ..Item::new(Kind::Domain, "a.com") }]).is_empty());
     }
 
     #[test]

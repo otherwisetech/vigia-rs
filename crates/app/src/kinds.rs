@@ -31,6 +31,17 @@ pub fn add_label(k: EntityKind) -> String {
     }
 }
 
+/// The heading over a section's items that no entity of its kind holds.
+pub fn loose_label(k: EntityKind) -> String {
+    match k {
+        EntityKind::Digital => i18n::t!("app.kinds.loose.digital"),
+        EntityKind::Vehicle => i18n::t!("app.kinds.loose.vehicle"),
+        EntityKind::Company => i18n::t!("app.kinds.loose.company"),
+        EntityKind::Property => i18n::t!("app.kinds.loose.property"),
+        _ => i18n::t!("app.kinds.loose.other"),
+    }
+}
+
 /// One line under a section's title.
 fn blurb(k: EntityKind) -> String {
     match k {
@@ -55,7 +66,7 @@ pub fn template_tip(tpl: &Template) -> String {
 
 /// The entities, by kind, the picker and the chips work with.
 fn entities_of(d: &Data, k: EntityKind) -> Vec<Ent> {
-    let mut v: Vec<Ent> = d.entities.iter().filter(|e| e.kind == k).cloned().collect();
+    let mut v: Vec<Ent> = d.entities.iter().filter(|e| e.kind == k && !e.archived).cloned().collect();
     v.sort_by_key(|e| e.name.to_lowercase());
     v
 }
@@ -65,7 +76,9 @@ impl VigiaApp {
     /// template's kind); the cursor waits in the date.
     pub fn start_from_template(&mut self, tpl: &'static Template, owner: Option<Ent>, kind: Option<EntityKind>, window: &mut Window, cx: &mut Context<Self>) {
         let mut it = tpl.item(owner.as_ref());
-        if owner.is_none() {
+        // a section's kind is the owner's for its own papers (a pet's vaccine), not for a
+        // domain or subscription, whose holder is a person or company
+        if owner.is_none() && tpl.category != vigia_core::model::Category::Digital {
             it.owner_kind = kind.or(it.owner_kind);
         }
         it.auto_check = it.kind.checkable();
@@ -140,6 +153,7 @@ impl VigiaApp {
         let items = d.items.clone();
         let entities = d.entities.clone();
         let cards = vigia_core::view::cards(&entities, &items, kind, today);
+        let loose: Vec<Item> = vigia_core::view::loose(&items, &entities, kind, today).into_iter().cloned().collect();
         let head = div()
             .flex()
             .items_center()
@@ -148,6 +162,12 @@ impl VigiaApp {
             .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).child(crate::entities::section_title_case(kind))).child(div().text_size(px(12.5)).text_color(t.ink_muted).child(blurb(kind))))
             .child(ui::filled_button(t, "kind-add", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(add_label(kind)).on_click(cx.listener(move |this, _, window, cx| this.start_new_entity(kind, window, cx))));
         let mut col = div().id("kind-page").flex().flex_col().size_full().overflow_y_scroll().px(px(28.)).py(px(22.)).gap(px(14.)).child(head);
+        if !loose.is_empty() {
+            col = col.child(self.loose_list(t, kind, &loose, cx));
+        }
+        if cards.is_empty() && !loose.is_empty() {
+            return col.child(div().text_size(px(12.5)).text_color(t.ink_muted).child(i18n::t!("app.kinds.loose_hint", kind = add_label(kind)))).child(self.template_chips(t, kind, None, &[], 0, 12, cx)).into_any_element();
+        }
         if cards.is_empty() {
             col = col.child(
                 div()
@@ -170,7 +190,7 @@ impl VigiaApp {
             let e = c.entity.clone();
             let id = e.id;
             let ring = c.status.map(|s| t.status(s)).unwrap_or(t.border);
-            let have: Vec<&Item> = items.iter().filter(|i| i.entity == Some(id) && i.state != State::Archived).collect();
+            let have: Vec<&Item> = items.iter().filter(|i| i.owned_by(id) && i.state != State::Archived).collect();
             let sub = [e.shown_ident(), e.detail.clone()].into_iter().filter(|s| !s.trim().is_empty()).collect::<Vec<_>>().join(" · "); // i18n-ok: separator
             let next = match c.next {
                 Some(it) => {
@@ -220,6 +240,51 @@ impl VigiaApp {
             );
         }
         col.child(grid).into_any_element()
+    }
+
+    /// The items of the section no entity of its kind holds (a company's domains in Digital),
+    /// each with its owners.
+    fn loose_list(&self, t: &Tokens, kind: EntityKind, items: &[Item], cx: &mut Context<Self>) -> Div {
+        let today = Data::today();
+        let d = self.data.read(cx);
+        let mut list = div().flex().flex_col().rounded(px(12.)).border_1().border_color(t.border).bg(t.surface);
+        for (k, it) in items.iter().enumerate() {
+            let id = it.id;
+            let color = t.status(it.status(today));
+            let owners = it.owner_ids().into_iter().filter_map(|o| d.entity(o).map(|e| e.name.clone())).collect::<Vec<_>>().join(", ");
+            let hover = t.canvas;
+            list = list.child(
+                div()
+                    .id(("loose", k))
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .px(px(14.))
+                    .py(px(9.))
+                    .when(k > 0, |d| d.border_t_1().border_color(t.border))
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(hover))
+                    .child(div().size(px(8.)).flex_none().rounded_full().bg(color))
+                    .child(crate::icons::kind_icon(it.kind, 14., t.ink_muted))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone()))
+                            .child(div().text_size(px(11.5)).text_color(t.ink_muted).truncate().child(if owners.is_empty() { i18n::t!("app.kinds.no_owner") } else { owners })),
+                    )
+                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(it.due_date(today).map(long_date).unwrap_or_else(|| i18n::t!("app.days.none"))))
+                    .child(ui::chip(days_text(it.days_left(today)), color, 11.5))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        this.selected = Some(id);
+                        this.edit = None;
+                        cx.notify();
+                    })),
+            );
+        }
+        div().flex().flex_col().gap(px(6.)).child(ui::section_title(t, loose_label(kind))).child(list)
     }
 
     /// The top bar's "from a template" menu: kind → entity → template, or a template for an

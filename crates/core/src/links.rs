@@ -31,6 +31,8 @@ pub enum Route {
     Item(ItemId),
     Owner(EntityId),
     Shared(Uuid),
+    /// A section page: `section/digital`, `section/vehicle`…
+    Section(EntityKind),
     New(Box<Prefill>),
     /// Someone else's link, or a path this version doesn't know.
     Unknown,
@@ -67,6 +69,7 @@ pub fn route(l: &Link) -> Route {
         Some("owner") => id(1).map_or(Route::Unknown, Route::Owner),
         Some("entity") => l.at(1).and_then(|s| Uuid::parse_str(s).ok()).map_or(Route::Unknown, Route::Shared),
         Some("new") => Route::New(Box::new(Prefill::from_link(l))),
+        Some("section") => l.at(1).and_then(EntityKind::from_id).map_or(Route::Unknown, Route::Section),
         Some(_) => Route::Unknown,
     }
 }
@@ -204,6 +207,8 @@ mod tests {
         assert_eq!(r("otherwise://vigia/item/x"), Route::Unknown);
         assert_eq!(r("otherwise://nodo/item/1"), Route::Unknown);
         assert_eq!(r("otherwise://vigia/weird"), Route::Unknown);
+        assert_eq!(r("otherwise://vigia/section/digital"), Route::Section(EntityKind::Digital));
+        assert_eq!(r("otherwise://vigia/section/spaceship"), Route::Unknown);
         assert_eq!(item_link(42).to_url(), "otherwise://vigia/item/42");
         assert_eq!(item_link(42).app_url(), "otherwise-vigia://item/42");
     }

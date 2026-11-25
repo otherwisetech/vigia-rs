@@ -29,6 +29,7 @@ pub fn relations() -> Vec<(&'static str, &'static str, Role)> {
         ("Ana", "Juan", Role::Family),                        // i18n-ok: demo names
         ("Otherwise SAS", "Google Workspace", Role::Owner),   // i18n-ok: demo names
         ("Ana", "Luna", Role::Owner),                         // i18n-ok: demo names
+        ("Ana", "Mazda ABC123", Role::Owner),                 // i18n-ok: demo names
     ]
 }
 
@@ -89,6 +90,13 @@ pub fn items(today: Date) -> Vec<Item> {
     n.currency = "USD".into();
     n.auto_renews = true;
     v.push(n);
+    let mut vc = of(Item::new(Kind::Domain, "vcity.io"), "Otherwise Technologies LLC", EntityKind::Company); // i18n-ok: demo domain
+    vc.expires = at(230);
+    v.push(vc);
+    let mut b = of(Item::new(Kind::Birthday, Kind::Birthday.label()), "Juan", EntityKind::Person); // i18n-ok: demo person
+    b.issued = Some(date::add_years(date::add_days(today, 9), -36));
+    b.tidy(today);
+    v.push(b);
     let mut x = of(Item::new(Kind::Extinguisher, i18n::t!("core.demo.extinguisher")), "Apto 301", EntityKind::Property); // i18n-ok: demo home
     x.expires = at(300);
     v.push(x);
@@ -114,7 +122,11 @@ pub fn seed(store: &Store, today: Date) -> Result<()> {
             store.relate(a, b, role)?;
         }
     }
-    for it in items(today) {
+    for mut it in items(today) {
+        // a domain both companies hold
+        if it.name == "otherwisetech.com" {
+            it.co_owners = id("Otherwise Technologies LLC").into_iter().collect(); // i18n-ok: demo company
+        }
         store.insert(&it)?;
     }
     Ok(())

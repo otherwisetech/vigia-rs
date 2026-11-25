@@ -18,7 +18,8 @@ crates/core   vigia-core (lib `vigia_core`), no UI:
               occurrences), backup.rs (zip), settings.rs, paths.rs, demo.rs, entity.rs (owners:
               kinds, plate / legal-suffix inference, find by name / ident, relations, masking of
               people's document numbers, `suggest_kind` for migration 5), templates.rs
-              (suggested reminders per entity kind; never a date), graph.rs
+              (suggested reminders per entity kind; never a date), fields.rs (which fields and
+              labels each item type's form and detail show; data, like the templates), graph.rs
               (map layout + camera math, deterministic), holidays.rs (computed public holidays,
               business-day shift), calendars.rs (read-only .ics overlays); otherwise-link
               integration: links.rs (deep-link routes, `new?…` prefill), feed.rs (Today
@@ -37,8 +38,9 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
               notice, migration question;
               views.rs: dashboard / timeline / calendar / list (+ holidays / overlay menu);
               entities.rs: entity page + form; kinds.rs: section pages (cards + template
-              chips), the top bar's template picker, new-entity form; graph.rs: the map canvas; panel.rs: item detail + edit
-              form; dialogs.rs: renew, delete, settings, OCR; macos.rs: NSStatusItem (from
+              chips, the items of a section no entity of its kind holds), the top bar's template picker,
+              new-entity form; graph.rs: the map canvas; icons.rs: item type icons (cake, rings…);
+              panel.rs: item detail + edit form (fields from `Kind::form()`); dialogs.rs: renew, delete, settings, OCR; macos.rs: NSStatusItem (from
               expense-rs); system.rs: notifications, launch at login; star.rs: GitHub star
               (from rama / nodo)
 ```
@@ -62,8 +64,15 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   it can sit in a synced folder. Schema changes are a new entry at the end of `db::MIGRATIONS`
   (never edit a shipped one) plus a test. Attachments are copied (never moved) into
   `vigia-files/<item id>/` and referenced by relative `/`-separated paths.
-- **Network only for opt-in checks.** RDAP and TLS run for items with `auto_check`, daily while
-  the app runs, from Otherwise Helper's `checks` job while it is closed (or `vigia check`). A calendar URL is downloaded only when the user adds or
+- **Owners** (docs/ownership.md): `items.entity_id` is the main owner, `item_owners` all of them
+  (`Item::co_owners` the others); entity → entity ownership is a `relations` row with role
+  `owner`; "what a person has" is `view::Filter::for_entity` (direct plus through what they own).
+  A category's section is `Category::section`; section pages add `view::loose` items. Never
+  preset a digital owner for a domain / certificate / subscription.
+- **Network only for checks.** RDAP (the domain name only) and TLS run for items with
+  `auto_check` (on by default for domains and certificates), when one is saved new or with
+  another host, on Check now, once for 0.7.0's backfill of dateless domains (`checks::backfill`,
+  meta `checks.backfill_070`), daily while the app runs, from Otherwise Helper's `checks` job while it is closed (or `vigia check`). A calendar URL is downloaded only when the user adds or
   refreshes it. The OCR models are downloaded only after the user confirms.
   The star count is the only other request (once a day, off switch). Tests never touch the
   network: parsers run on fixtures in `crates/core/tests/fixtures`, checks through the `Checker`
@@ -94,10 +103,12 @@ crates/app    `vigia-app` (GPUI + gpui-component). main.rs: menus, Handles, back
   ⌘J): the user's Claude Code / Codex / opencode with `vigia mcp --db <open db>` for that
   session only (never write the user's agent configs). The panel never gets `--allow-writes`:
   outside "Solo lectura" it starts `--propose <app dir>/assistant/live/<pid>/proposals`, where
-  `add_item` / `renew_item` / `propose_add_from_template` only validate and drop a `vigia_core::agent::Proposal`; the window
-  polls it, shows cards and applies them with the same parsing (`agent::item_from_args`,
-  `renewal_from_args`) through `Data::save` / `Data::renew` on Aplicar. A database open on
-  another computer gets read tools only.
+  every tool in `agent::WRITE_TOOLS` only validates (`agent::plan`) and drops a
+  `vigia_core::agent::Proposal`; the window polls it, shows the plan's title and lines as a card
+  and on Aplicar re-plans it against the current data and runs `agent::apply` through
+  `Data::apply_plan` (so `Store::write`), keeping the returned `Undo` steps for the toast's
+  Undo. A new screen action that writes needs a write tool too (README's table). A database open
+  on another computer gets read tools only.
 - **Templates never carry a date** and never fix a calendar rule (`Wyoming` / `Yearly`): the
   user enters legally set dates; tax filings get the accountant note. A new template needs its
   label (and note) in every catalog; the catalogue test checks kind, interval and lead.

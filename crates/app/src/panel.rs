@@ -4,7 +4,7 @@ use crate::app::VigiaApp;
 use crate::state::Data;
 use crate::theme::Tokens;
 use crate::ui::{self, icon};
-use crate::views::{days_text, long_date};
+use crate::views::{days_text, long_date, long_day_month};
 use gpui::prelude::FluentBuilder as _;
 use gpui::*;
 use gpui_component::button::{Button, ButtonVariants as _};
@@ -15,6 +15,7 @@ use gpui_component::{IconName, Sizable as _};
 use vigia_core::date::{self, Date};
 use vigia_core::entity::{self, EntityKind};
 use vigia_core::holidays::{BusinessDays, Country, Shift};
+use vigia_core::fields::Field;
 use vigia_core::model::{Category, Item, ItemId, Kind, Recurrence, State, Unit, leads_text, parse_leads};
 
 pub const PANEL_W: f32 = 380.;
@@ -43,6 +44,8 @@ pub struct EditForm {
     pub owner: Entity<InputState>,
     /// The kind picked for a new owner; `None` until the user picks (then it's guessed).
     pub owner_kind: Option<EntityKind>,
+    /// Owners besides the one typed (a car two people own).
+    pub co_owners: Vec<vigia_core::entity::EntityId>,
     pub issued: Entity<InputState>,
     pub expires: Entity<InputState>,
     pub term: Entity<InputState>,
@@ -62,7 +65,17 @@ pub struct EditForm {
 }
 
 fn d2s(d: Option<Date>) -> String {
-    d.map(date::iso).unwrap_or_default()
+    d.map(|d| date::short(d, VigiaApp::order())).unwrap_or_default()
+}
+
+/// What a birthday's or anniversary's date field holds: the full date when the year is known,
+/// else the day and month.
+fn celebration_text(it: &Item) -> String {
+    match (it.issued, it.recurrence) {
+        (Some(d), _) => d2s(Some(d)),
+        (None, Recurrence::Yearly { month, day }) => date::short_day_month(month, day, VigiaApp::order()),
+        (None, _) => d2s(it.expires),
+    }
 }
 
 /// Recurrence choices in the form; rule-based ones take their month / day from the dates.
@@ -89,7 +102,7 @@ impl VigiaApp {
         let name = mk(it.name.clone(), i18n::t!("app.edit.name_ph"), window, cx);
         name.update(cx, |s, cx| s.focus(window, cx));
         let expires = mk(d2s(it.expires), date_ph.clone(), window, cx);
-        let issued = mk(d2s(it.issued), date_ph, window, cx);
+        let issued = if it.kind.is_celebration() { mk(celebration_text(&it), i18n::t!("app.edit.day_ph"), window, cx) } else { mk(d2s(it.issued), date_ph, window, cx) };
         let owner = mk(it.owner.clone(), i18n::t!("app.edit.owner_ph"), window, cx);
         let subs = vec![cx.observe(&expires, |_, _, cx| cx.notify()), cx.observe(&issued, |_, _, cx| cx.notify()), cx.observe(&owner, |_, _, cx| cx.notify())];
         EditForm {
@@ -104,6 +117,7 @@ impl VigiaApp {
             owner,
             // a template for an owner still to name brings that owner's kind
             owner_kind: it.owner_kind.filter(|_| it.entity.is_none() && it.id == 0),
+            co_owners: it.co_owners.clone(),
             issued,
             expires,
             term: mk(it.term_months.map(|v| v.to_string()).unwrap_or_default(), String::new(), window, cx),
@@ -173,6 +187,8 @@ impl VigiaApp {
                 f.auto_check = true;
             }
         }
+        let ph = if kind.is_celebration() { i18n::t!("app.edit.day_ph") } else { i18n::t!("app.edit.date_ph") };
+        f.issued.update(cx, |s, cx| s.set_placeholder(ph, window, cx));
         cx.notify();
     }
 
@@ -210,8 +226,27 @@ impl VigiaApp {
                 it.owner_kind = Some(f.owner_kind.unwrap_or_else(|| entity::guess(&owner, Some(f.kind))));
             }
             it.owner = owner;
-            it.issued = parse_date(&f.issued)?;
-            it.expires = parse_date(&f.expires)?;
+            it.co_owners = f.co_owners.clone();
+            if f.kind.is_celebration() {
+                // a day and month alone is fine: the year is optional
+                match date::parse_day_month(&val(&f.issued), order) {
+                    Some((month, day)) => {
+                        it.issued = None;
+                        it.expires = None;
+                        it.recurrence = Recurrence::Yearly { month, day };
+                    }
+                    None => {
+                        it.issued = parse_date(&f.issued)?;
+                        it.expires = None;
+                        if it.issued.is_some() {
+                            it.recurrence = Recurrence::None;
+                        }
+                    }
+                }
+            } else {
+                it.issued = parse_date(&f.issued)?;
+                it.expires = parse_date(&f.expires)?;
+            }
             it.term_months = num(&f.term)?;
             it.notice_days = num(&f.notice)?;
             let cost = val(&f.cost);
@@ -230,14 +265,11 @@ impl VigiaApp {
             Ok(it) => it,
             Err(e) => return self.toast(e, cx),
         };
-        let check_now = it.auto_check && (it.id == 0 || !f.base.auto_check || it.host != f.base.host);
+        // saving looks a domain or certificate up when it is new or its name changed
         match self.data.update(cx, |d, cx| d.save(it, cx)) {
             Ok(id) => {
                 self.edit = None;
                 self.selected = Some(id);
-                if check_now {
-                    self.data.update(cx, |d, cx| d.check(vec![id], cx));
-                }
                 cx.notify();
             }
             Err(e) => self.toast(e, cx),
@@ -276,20 +308,23 @@ impl VigiaApp {
             body = body.child(row(i18n::t!("app.field.end"), end.map(long_date).unwrap_or_default()));
             body = body.child(row(i18n::t!("app.field.notice"), i18n::tn!("app.field.notice_days", it.notice_days.unwrap_or(0))));
         }
+        let spec = it.kind.form();
         if let Some(i) = it.issued {
-            body = body.child(row(if it.kind == Kind::Warranty { i18n::t!("app.field.purchased") } else { i18n::t!("app.field.issued") }, long_date(i)));
+            body = body.child(row(spec.label(Field::Issued), long_date(i)));
         }
         if let Some(m) = it.term_months.filter(|_| it.kind == Kind::Warranty) {
             body = body.child(row(i18n::t!("app.field.term"), i18n::tn!("app.field.months", m)));
         }
-        body = body.child(row(i18n::t!("app.field.recurrence"), it.recurrence.label()));
+        if !it.kind.is_celebration() {
+            body = body.child(row(spec.label(Field::Recurrence), it.recurrence.label()));
+        }
         if let Some(b) = it.business_days {
             body = body.child(row(i18n::t!("app.field.business_days"), b.label()));
         }
         if let Some(c) = it.cost {
             body = body.child(row(i18n::t!("app.field.cost"), format!("{} {}", fmt_money(c), it.currency).trim().to_string()));
         }
-        for (label, v) in [(i18n::t!("app.field.provider"), &it.provider), (i18n::t!("app.field.reference"), &it.reference), (i18n::t!("app.field.host"), &it.host)] {
+        for (label, v) in [(spec.label(Field::Provider), &it.provider), (spec.label(Field::Reference), &it.reference), (spec.label(Field::Host), &it.host)] {
             if !v.is_empty() {
                 body = body.child(row(label, v.clone()));
             }
@@ -313,12 +348,31 @@ impl VigiaApp {
         let mut check = div().flex().flex_col().gap(px(6.)).px(px(18.));
         if it.kind.checkable() {
             let now = vigia_core::db::now_secs();
-            let last = it.last_checked.map(|s| i18n::t!("app.check.last", when = ago(s, now))).unwrap_or_else(|| i18n::t!("app.check.never"));
+            let source = vigia_core::checks::source(it);
+            let checked_today = vigia_core::checks::last_checked_day(it) == Some(today);
+            let last = it.last_checked.map(|s| i18n::t!("app.check.source_line", source = source, when = if checked_today { i18n::t!("app.check.today") } else { ago(s, now) })).unwrap_or_else(|| i18n::t!("app.check.never"));
+            let manual = vigia_core::checks::needs_manual(it);
             check = check
                 .child(ui::section_title(t, i18n::t!("app.check.title")))
                 .child(div().text_size(px(12.)).text_color(t.ink_muted).child(if it.auto_check { i18n::t!("app.check.on", target = vigia_core::checks::target(it)) } else { i18n::t!("app.check.off") }))
                 .child(div().text_size(px(12.)).child(last))
-                .when(!it.check_note.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(t.ink_muted).child(it.check_note.clone())))
+                .when(!it.check_note.is_empty() && !manual, |d| d.child(div().text_size(px(12.)).text_color(t.ink_muted).child(it.check_note.clone())))
+                .when(manual, |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(6.))
+                            .p(px(10.))
+                            .rounded(px(8.))
+                            .bg(t.warn.opacity(0.12))
+                            .border_1()
+                            .border_color(t.warn.opacity(0.4))
+                            .child(div().text_size(px(12.5)).font_weight(FontWeight::MEDIUM).child(i18n::t!("app.check.manual_title")))
+                            .child(div().text_size(px(12.)).text_color(t.ink_muted).child(it.check_note.clone()))
+                            .child(div().flex().child(ui::outline_button(t, "check-manual").child(i18n::t!("app.check.manual_enter")).on_click(cx.listener(move |this, _, window, cx| this.start_edit(id, window, cx))))),
+                    )
+                })
                 .child(
                     div().flex().child(
                         ui::outline_button(t, "check-now")
@@ -328,6 +382,34 @@ impl VigiaApp {
                             .when(!checking, |d| d.on_click(cx.listener(move |this, _, _, cx| this.data.update(cx, |d, cx| d.check(vec![id], cx))))),
                     ),
                 );
+        }
+        // a free-form item that reads like a birthday or anniversary
+        if let Some(k) = (it.kind == Kind::Custom).then(|| Kind::celebration_in(&it.name)).flatten() {
+            let mut conv = it.clone();
+            conv.kind = k;
+            conv.normalize_celebration(today);
+            let ok = conv.celebration_day().is_some();
+            body = body.child(
+                div()
+                    .mt(px(8.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .p(px(10.))
+                    .rounded(px(8.))
+                    .bg(t.accent_soft)
+                    .child(div().text_size(px(12.5)).child(i18n::t!("app.celebration.suggest", kind = k.label())))
+                    .when(ok, |d| {
+                        d.child(div().flex().child(ui::filled_button(t, "convert-celebration", t.accent).child(i18n::t!("app.celebration.convert", kind = k.label())).on_click(cx.listener(move |this, _, _, cx| {
+                            let conv = conv.clone();
+                            match this.data.update(cx, |d, cx| d.save(conv, cx)) {
+                                Ok(_) => this.toast(i18n::t!("app.celebration.converted"), cx),
+                                Err(e) => this.toast(e, cx),
+                            }
+                        }))))
+                    })
+                    .when(!ok, |d| d.child(div().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.celebration.needs_date")))),
+            );
         }
         // attachments
         let mut att = div().flex().flex_col().gap(px(4.)).px(px(18.)).child(ui::section_title(t, i18n::t!("app.attach.title")));
@@ -447,6 +529,7 @@ impl VigiaApp {
             .child(ui::outline_button(t, "progress").when(in_progress, |d| d.border_color(t.accent).text_color(t.accent)).child(if in_progress { i18n::t!("app.item.in_progress_on") } else { i18n::t!("app.item.in_progress") }).on_click(cx.listener(move |this, _, _, cx| this.data.update(cx, |d, cx| d.set_state(id, if in_progress { State::Active } else { State::InProgress }, cx)))))
             .child(ui::outline_button(t, "edit").child(i18n::t!("app.item.edit")).on_click(cx.listener(move |this, _, window, cx| this.start_edit(id, window, cx))));
         let due = it.due_date(today);
+        let spec_expires = it.kind.form().label(Field::Expires);
         let head = div()
             .flex()
             .flex_col()
@@ -457,22 +540,30 @@ impl VigiaApp {
                 this.selected = None;
                 cx.notify();
             }))))
-            .when(!it.owner.is_empty(), |d| {
-                let ent = it.entity;
+            .children({
                 let accent = t.accent;
-                d.child(
-                    div()
-                        .id("detail-owner")
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .text_size(px(13.))
-                        .text_color(t.ink_muted)
-                        .child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 13., t.ink_muted))
-                        .child(it.owner.clone())
-                        .child(div().text_size(px(11.5)).child(format!("· {}", it.owner_kind.unwrap_or_default().label()))) // i18n-ok: separator
-                        .when_some(ent, |d, id| d.cursor_pointer().hover(move |s| s.text_color(accent).underline()).on_click(cx.listener(move |this, _, _, cx| this.open_entity(id, cx)))),
-                )
+                let owners: Vec<(Option<vigia_core::entity::EntityId>, String, EntityKind)> = if it.owner_ids().is_empty() {
+                    (!it.owner.is_empty()).then(|| (None, it.owner.clone(), it.owner_kind.unwrap_or_default())).into_iter().collect()
+                } else {
+                    it.owner_ids().into_iter().filter_map(|id| d.entity(id).map(|e| (Some(id), e.name.clone(), e.kind))).collect()
+                };
+                (!owners.is_empty()).then(|| {
+                    let mut row = div().flex().flex_wrap().items_center().gap(px(10.)).text_size(px(13.)).text_color(t.ink_muted);
+                    for (k, (ent, name, kind)) in owners.into_iter().enumerate() {
+                        row = row.child(
+                            div()
+                                .id(("detail-owner", k))
+                                .flex()
+                                .items_center()
+                                .gap(px(6.))
+                                .child(ui::entity_icon(kind, 13., t.ink_muted))
+                                .child(name)
+                                .child(div().text_size(px(11.5)).child(format!("· {}", kind.label()))) // i18n-ok: separator
+                                .when_some(ent, |d, id| d.cursor_pointer().hover(move |s| s.text_color(accent).underline()).on_click(cx.listener(move |this, _, _, cx| this.open_entity(id, cx)))),
+                        );
+                    }
+                    row
+                })
             })
             .child(div().flex().flex_wrap().gap(px(6.)).child(ui::chip(it.kind.label(), t.accent, 11.5)).child(ui::chip(it.category.label(), t.ink_muted, 11.5)).when(in_progress, |d| d.child(ui::chip(i18n::t!("app.state.in_progress"), t.accent, 11.5))).when(archived, |d| d.child(ui::chip(i18n::t!("app.state.archived"), t.ink_muted, 11.5))))
             .child(
@@ -486,7 +577,8 @@ impl VigiaApp {
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(if it.notice_days.is_some_and(|n| n > 0) { i18n::t!("app.field.notice_by") } else { i18n::t!("app.field.expires") }))
+                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(if it.kind.is_celebration() { i18n::t!("app.field.next_time") } else if it.notice_days.is_some_and(|n| n > 0) { i18n::t!("app.field.notice_by") } else { spec_expires.clone() }))
+                    .children(due.and_then(|d| it.celebration_text(d)).map(|txt| div().text_size(px(13.)).child(txt)))
                     .child(div().text_size(px(18.)).font_weight(FontWeight::SEMIBOLD).child(due.map(long_date).unwrap_or_else(|| i18n::t!("app.days.none"))))
                     .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).text_color(color).child(format!("{} · {}", days_text(it.days_left(today)), it.status(today).label()))), // i18n-ok: separator
             );
@@ -599,6 +691,58 @@ impl VigiaApp {
             }
         };
         let kind = f.kind;
+        let spec = kind.form();
+        let shows = |x: Field| spec.shows(x, &f.base);
+        // owners besides the one typed
+        let ents = self.data.read(cx).entities.clone();
+        let mut owners_row = div().flex().flex_wrap().items_center().gap(px(6.));
+        for (k, id) in f.co_owners.iter().copied().enumerate() {
+            let Some(e) = ents.iter().find(|e| e.id == id) else { continue };
+            owners_row = owners_row.child(
+                div()
+                    .id(("co-owner", k))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .h(px(22.))
+                    .px(px(8.))
+                    .rounded(px(11.))
+                    .border_1()
+                    .border_color(t.border)
+                    .text_size(px(11.5))
+                    .child(ui::entity_icon(e.kind, 11., t.ink_muted))
+                    .child(e.name.clone())
+                    .child(div().id(("co-owner-rm", k)).cursor_pointer().child(icon(IconName::Close, 10., t.ink_muted)).on_click(cx.listener(move |this, _, _, cx| {
+                        if let Some(f) = this.edit.as_mut() {
+                            f.co_owners.retain(|x| *x != id);
+                        }
+                        cx.notify();
+                    }))),
+            );
+        }
+        let typed_owner = f.owner.read(cx).value().trim().to_lowercase();
+        let candidates: Vec<(vigia_core::entity::EntityId, String, EntityKind)> = ents.iter().filter(|e| !e.archived && !f.co_owners.contains(&e.id) && e.name.trim().to_lowercase() != typed_owner).map(|e| (e.id, e.name.clone(), e.kind)).collect();
+        let show_owners_row = !f.co_owners.is_empty() || !candidates.is_empty() && !typed_owner.is_empty();
+        if !candidates.is_empty() && !typed_owner.is_empty() {
+            let weak = cx.entity().downgrade();
+            owners_row = owners_row.child(Button::new("co-owner-add").ghost().xsmall().icon(IconName::Plus).label(i18n::t!("app.edit.add_owner")).dropdown_menu(move |mut menu, _, _| {
+                for (id, name, k) in candidates.clone() {
+                    let w = weak.clone();
+                    menu = menu.item(PopupMenuItem::new(i18n::t!("app.edit.owner_choice", name = name, kind = k.label())).on_click(move |_, _, cx| {
+                        w.update(cx, |this, cx| {
+                            if let Some(f) = this.edit.as_mut()
+                                && !f.co_owners.contains(&id)
+                            {
+                                f.co_owners.push(id);
+                            }
+                            cx.notify();
+                        })
+                        .ok();
+                    }));
+                }
+                menu
+            }));
+        }
         let mut form = div()
             .flex()
             .flex_col()
@@ -610,14 +754,46 @@ impl VigiaApp {
             .child(field(i18n::t!("app.field.name"), &f.name))
             .child(field(i18n::t!("app.field.owner"), &f.owner))
             .children(owner_hint)
-            .child(half(date_field(if kind == Kind::Warranty { i18n::t!("app.field.purchased") } else { i18n::t!("app.field.issued") }, &f.issued), date_field(i18n::t!("app.field.expires"), &f.expires)));
-        if kind == Kind::Warranty {
-            form = form.child(field(i18n::t!("app.field.term_months"), &f.term)).child(div().text_size(px(11.)).text_color(t.ink_muted).child(i18n::t!("app.edit.warranty_hint")));
+            .when(show_owners_row, |d| d.child(owners_row));
+        if kind.is_celebration() {
+            let typed = f.issued.read(cx).value().trim().to_string();
+            let hint = match date::parse_day_month(&typed, order) {
+                Some((m, d)) => Some((i18n::t!("app.edit.every_year", date = long_day_month(m, d)), true)),
+                None => preview(&f.issued).map(|(txt, ok)| match date::parse_loose(&typed, today, order) {
+                    Some(born) if ok => {
+                        let next = date::yearly_next(chrono::Datelike::month(&born), chrono::Datelike::day(&born), today);
+                        let n = chrono::Datelike::year(&next) - chrono::Datelike::year(&born);
+                        (if n > 0 { i18n::tn!("app.edit.turns", n, date = long_date(next)) } else { txt }, true)
+                    }
+                    _ => (txt, ok),
+                }),
+            };
+            form = form.child(div().flex().flex_col().gap(px(3.)).child(label(spec.label(Field::Issued))).child(Input::new(&f.issued).small()).children(hint.map(|(txt, ok)| div().text_size(px(11.)).text_color(if ok { t.ink_muted } else { t.danger }).child(txt))));
+        } else {
+            match (shows(Field::Issued), shows(Field::Expires)) {
+                (true, true) => form = form.child(half(date_field(spec.label(Field::Issued), &f.issued), date_field(spec.label(Field::Expires), &f.expires))),
+                (true, false) => form = form.child(date_field(spec.label(Field::Issued), &f.issued)),
+                (false, true) => form = form.child(date_field(spec.label(Field::Expires), &f.expires)),
+                (false, false) => {}
+            }
         }
-        if kind == Kind::Contract || f.base.notice_days.is_some() {
-            form = form.child(field(i18n::t!("app.field.notice_days_label"), &f.notice));
+        if kind.checkable() {
+            form = form.child(field(spec.label(Field::Host), &f.host)).child(Checkbox::new("form-check").small().label(spec.label(Field::AutoCheck)).checked(f.auto_check).on_click(cx.listener(|this, v: &bool, _, cx| {
+                if let Some(f) = this.edit.as_mut() {
+                    f.auto_check = *v;
+                }
+                cx.notify();
+            }))).child(div().text_size(px(11.)).text_color(t.ink_muted).child(if kind == Kind::Domain { i18n::t!("app.edit.rdap_hint") } else { i18n::t!("app.edit.tls_hint") }));
         }
-        form = form.child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.recurrence"))).child(rec_btn));
+        if shows(Field::Term) {
+            form = form.child(field(spec.label(Field::Term), &f.term)).child(div().text_size(px(11.)).text_color(t.ink_muted).child(i18n::t!("app.edit.warranty_hint")));
+        }
+        if shows(Field::Notice) {
+            form = form.child(field(spec.label(Field::Notice), &f.notice));
+        }
+        if shows(Field::Recurrence) {
+            form = form.child(div().flex().flex_col().gap(px(3.)).child(label(spec.label(Field::Recurrence))).child(rec_btn));
+        }
         let cur_b = f.business_days;
         let weak = cx.entity().downgrade();
         let set_b = move |w: &WeakEntity<VigiaApp>, b: Option<BusinessDays>, cx: &mut App| {
@@ -655,32 +831,36 @@ impl VigiaApp {
                 menu
             })
         });
-        form = form.child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.business_days"))).child(div().flex().gap(px(8.)).child(div().flex_1().min_w_0().child(shift_btn)).children(country_btn.map(|b| div().flex_1().min_w_0().child(b)))));
+        if shows(Field::BusinessDays) || cur_b.is_some() {
+            form = form.child(div().flex().flex_col().gap(px(3.)).child(label(spec.label(Field::BusinessDays))).child(div().flex().gap(px(8.)).child(div().flex_1().min_w_0().child(shift_btn)).children(country_btn.map(|b| div().flex_1().min_w_0().child(b)))));
+        }
         if matches!(kind, Kind::WyomingReport | Kind::CamaraComercio) {
             form = form.child(div().text_size(px(11.)).text_color(t.ink_muted).child(if kind == Kind::WyomingReport { i18n::t!("app.edit.wyoming_hint") } else { i18n::t!("app.edit.camara_hint") }));
         }
-        if kind.checkable() {
-            form = form.child(field(if kind == Kind::Domain { i18n::t!("app.field.domain") } else { i18n::t!("app.field.host") }, &f.host)).child(Checkbox::new("form-check").small().label(i18n::t!("app.edit.auto_check")).checked(f.auto_check).on_click(cx.listener(|this, v: &bool, _, cx| {
-                if let Some(f) = this.edit.as_mut() {
-                    f.auto_check = *v;
-                }
-                cx.notify();
-            }))).child(div().text_size(px(11.)).text_color(t.ink_muted).child(if kind == Kind::Domain { i18n::t!("app.edit.rdap_hint") } else { i18n::t!("app.edit.tls_hint") }));
+        form = form.child(field(spec.label(Field::Leads), &f.leads));
+        if shows(Field::Cost) {
+            form = form.child(half(field(spec.label(Field::Cost), &f.cost), field(i18n::t!("app.field.currency"), &f.currency)));
         }
-        form = form
-            .child(field(i18n::t!("app.field.reminders_label"), &f.leads))
-            .child(half(field(i18n::t!("app.field.cost"), &f.cost), field(i18n::t!("app.field.currency"), &f.currency)))
-            .child(field(i18n::t!("app.field.provider"), &f.provider))
-            .child(field(i18n::t!("app.field.reference"), &f.reference))
-            .child(field(i18n::t!("app.field.url"), &f.url))
-            .child(field(i18n::t!("app.field.tags"), &f.tags))
-            .child(Checkbox::new("form-auto").small().label(i18n::t!("app.field.auto_renews")).checked(f.auto_renews).on_click(cx.listener(|this, v: &bool, _, cx| {
+        if shows(Field::Provider) {
+            form = form.child(field(spec.label(Field::Provider), &f.provider));
+        }
+        if shows(Field::Reference) {
+            form = form.child(field(spec.label(Field::Reference), &f.reference));
+        }
+        if shows(Field::RenewalUrl) {
+            form = form.child(field(spec.label(Field::RenewalUrl), &f.url));
+        }
+        form = form.child(field(spec.label(Field::Tags), &f.tags));
+        if shows(Field::AutoRenews) || f.auto_renews {
+            form = form.child(Checkbox::new("form-auto").small().label(spec.label(Field::AutoRenews)).checked(f.auto_renews).on_click(cx.listener(|this, v: &bool, _, cx| {
                 if let Some(f) = this.edit.as_mut() {
                     f.auto_renews = *v;
                 }
                 cx.notify();
-            })))
-            .child(div().flex().flex_col().gap(px(3.)).child(label(i18n::t!("app.field.notes"))).child(div().rounded(px(6.)).border_1().border_color(t.border).bg(t.canvas).px(px(6.)).py(px(4.)).text_size(px(12.5)).child(Textarea::new(&f.notes))))
+            })));
+        }
+        form = form
+            .child(div().flex().flex_col().gap(px(3.)).child(label(spec.label(Field::Notes))).child(div().rounded(px(6.)).border_1().border_color(t.border).bg(t.canvas).px(px(6.)).py(px(4.)).text_size(px(12.5)).child(Textarea::new(&f.notes))))
             .when(ro, |f| f.child(ui::read_only_note(t)))
             .child(
                 div()

@@ -7,6 +7,7 @@ mod assistant;
 mod dialogs;
 mod entities;
 mod graph;
+mod icons;
 mod kinds;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -117,6 +118,8 @@ impl AssetSource for AppAssets {
             ui::HOUSE_SVG => Some(include_bytes!("../assets/icons/vigia-house.svg")),
             ui::PAW_SVG => Some(include_bytes!("../assets/icons/vigia-paw.svg")),
             ui::GRAPH_SVG => Some(include_bytes!("../assets/icons/vigia-graph.svg")),
+            icons::CAKE_SVG => Some(include_bytes!("../assets/icons/vigia-cake.svg")),
+            icons::RINGS_SVG => Some(include_bytes!("../assets/icons/vigia-rings.svg")),
             _ => None,
         };
         if let Some(b) = own {

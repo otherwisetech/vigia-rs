@@ -77,6 +77,7 @@ pub(crate) fn item_json(it: &Item, today: Date) -> Value {
         "owner": it.owner,
         "owner_kind": it.owner_kind.filter(|_| !it.owner.is_empty()).map(|k| k.id()),
         "entity_id": it.entity,
+        "owner_ids": it.owner_ids(),
         "category": it.category.id(),
         "issued": d(it.issued),
         "expires": d(it.end_date(today)),
@@ -101,6 +102,8 @@ pub(crate) fn item_json(it: &Item, today: Date) -> Value {
         "auto_check": it.auto_check,
         "last_checked": it.last_checked,
         "check_note": it.check_note,
+        "check_source": it.kind.checkable().then(|| vigia_core::checks::source(it)),
+        "needs_manual_date": vigia_core::checks::needs_manual(it),
         "notes": it.notes,
     })
 }
@@ -131,12 +134,13 @@ pub(crate) fn entity_json(e: &Entity, items: &[Item]) -> Value {
         "country": e.country,
         "notes": e.notes,
         "shared_id": e.shared.as_deref().filter(|s| *s != vigia_core::sync::DETACHED),
-        "items": items.iter().filter(|i| i.entity == Some(e.id)).count(),
+        "archived": e.archived,
+        "items": items.iter().filter(|i| i.owned_by(e.id)).count(),
     })
 }
 
 fn entity_line(e: &Entity, items: &[Item]) -> String {
-    let n = items.iter().filter(|i| i.entity == Some(e.id)).count();
+    let n = items.iter().filter(|i| i.owned_by(e.id)).count();
     format!("{:>4}  {:<10}  {}  {}  ({})", e.id, e.kind.id(), e.name, e.ident, i18n::tn!("cli.entity.items", n)) // i18n-ok: table row
 }
 
@@ -273,8 +277,10 @@ pub(crate) fn publish_today(s: &Store) -> Option<usize> {
     }
     let items = s.items().ok()?;
     let entities = s.entities().ok()?;
-    let _ = vigia_core::calendar_feed::publish(&root, &items, &entities, date::today());
-    vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
+    vigia_core::feed::in_app_language(s, || {
+        let _ = vigia_core::calendar_feed::publish(&root, &items, &entities, date::today());
+        vigia_core::feed::publish(&root, &items, &entities, date::today()).ok().map(|v| v.len())
+    })
 }
 
 fn open(a: &Args) -> Result<Store, String> {
@@ -299,10 +305,12 @@ fn run_command(a: &Args) -> Result<(), String> {
         "list" | "ls" => {
             let s = open(a)?;
             let items = s.items().map_err(|e| e.to_string())?;
+            // an owner that matches nothing shows nothing
+            let owner = a.opt("owner").map(|o| entity_arg(&s, Some(&o.to_string())).map(|e| e.id).unwrap_or(-1));
             let f = Filter {
                 query: a.pos.join(" "),
-                // an owner that matches nothing shows nothing
-                entity: a.opt("owner").map(|o| entity_arg(&s, Some(&o.to_string())).map(|e| e.id).unwrap_or(-1)),
+                through: owner.map(|o| vigia_core::entity::owned_through(o, &s.relations().unwrap_or_default())).unwrap_or_default(),
+                entity: owner,
                 entity_kind: entity_kind_opt(a, "owner-kind")?,
                 category: a.opt("category").map(|c| Category::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_category", value = c))).transpose()?,
                 status: a.opt("status").map(|c| Status::from_id(c).ok_or_else(|| i18n::t!("cli.err.bad_status", value = c))).transpose()?,
@@ -467,7 +475,7 @@ fn run_command(a: &Args) -> Result<(), String> {
             let rels = s.relations().map_err(|x| x.to_string())?;
             let all = s.entities().map_err(|x| x.to_string())?;
             let name = |id: i64| all.iter().find(|x| x.id == id).map(|x| x.name.clone()).unwrap_or_default();
-            let mine: Vec<&Item> = view::sorted(items.iter().filter(|i| i.entity == Some(e.id)), today);
+            let mine: Vec<&Item> = view::sorted(items.iter().filter(|i| i.owned_by(e.id)), today);
             let links: Vec<_> = rels.iter().filter(|r| r.from == e.id || r.to == e.id).collect();
             let mut v = entity_json(&e, &items);
             v["item_list"] = mine.iter().map(|i| item_json(i, today)).collect();

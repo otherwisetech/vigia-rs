@@ -84,6 +84,11 @@ pub fn upcoming(items: &[Item], from: Date, to: Date) -> Vec<Reminder> {
 /// The text of a reminder: "Pasaporte (Ana) expires in 30 days".
 pub fn message(item: &Item, r: &Reminder, today: Date) -> (String, String) {
     let days = date::days_between(today, r.deadline);
+    if item.kind.is_celebration() {
+        let title = item.celebration_text(r.deadline).unwrap_or_else(|| item.title());
+        let body = if days <= 0 { i18n::t!("core.remind.celebration_today") } else { i18n::tn!("core.remind.celebration_in", days) };
+        return (title, body);
+    }
     let title = item.title();
     let body = if item.notice_days.is_some_and(|n| n > 0) {
         if days < 0 {

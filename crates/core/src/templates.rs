@@ -59,7 +59,8 @@ pub const ALL: &[Template] = &[
     t("pet_checkup", &[Pt], Kind::Checkup, Category::Health, YEARLY, &[14, 3], "core.tpl.pet_checkup", None),
     t("pet_grooming", &[Pt], Kind::Custom, Category::Other, every(1, Unit::Month), &[2], "core.tpl.pet_grooming", None),
     // people
-    t("birthday", &[Pe], Kind::Custom, Category::Other, YEARLY, &[7, 1], "core.tpl.birthday", None),
+    t("birthday", &[Pe, Pt], Kind::Birthday, Category::Celebration, YEARLY, &[7, 1], "core.tpl.birthday", None),
+    t("anniversary", &[Pe, Co], Kind::Anniversary, Category::Celebration, YEARLY, &[7, 1], "core.tpl.anniversary", None),
     t("national_id", &[Pe], Kind::NationalId, Category::Identity, NONE, &[90, 30, 7], "core.tpl.national_id", Some("core.tplnote.private")),
     t("passport", &[Pe], Kind::Passport, Category::Identity, NONE, &[270, 180, 90, 30], "core.tpl.passport", Some("core.tplnote.private")),
     t("visa", &[Pe], Kind::Visa, Category::Identity, NONE, &[120, 60, 30, 7], "core.tpl.visa", None),
@@ -120,7 +121,9 @@ impl Template {
             it.owner = e.name.clone();
             it.entity = Some(e.id);
             it.owner_kind = Some(e.kind);
-        } else {
+        } else if self.category != Category::Digital {
+            // a domain's or subscription's holder is guessed from the name typed (a person or
+            // a company), never preset to a "digital" owner
             it.owner_kind = Some(self.owners[0]);
         }
         it
@@ -213,6 +216,9 @@ mod tests {
         let cc = by_id("camara_comercio").unwrap().item(None);
         assert_eq!((cc.recurrence, cc.owner_kind, cc.entity), (YEARLY, Some(Co), None));
         assert_eq!(cc.end_date(crate::date::ymd(2026, 11, 20).unwrap()), None);
+        assert_eq!(by_id("domain").unwrap().item(None).owner_kind, None, "who holds a domain is typed, not preset");
+        let b = by_id("birthday").unwrap().item(None);
+        assert_eq!((b.kind, b.category, b.owner_kind), (Kind::Birthday, Category::Celebration, Some(Pe)));
         let w = by_id("appliance_warranty").unwrap().item(None);
         assert_eq!(w.term_months, Some(12));
         assert_eq!(by_id("contract").unwrap().item(None).notice_days, Some(30));
