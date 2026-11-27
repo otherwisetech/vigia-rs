@@ -3,10 +3,23 @@ name: Release
 # Builds downloadable apps for macOS, Linux and Windows.
 # - push a tag like v0.2.0 → a GitHub Release with the three downloads attached
 # - "Run workflow" by hand → the same builds as workflow artifacts, no release
+# - "Run workflow" with a tag → rebuilds that tag and attaches the downloads to its release
+# The release step creates the release if it doesn't exist yet, otherwise it only adds (or
+# replaces) the files built here, each with a .sha256: notes and files uploaded by hand (e.g. a
+# local <bin>-macos-arm64.zip) are kept.
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to rebuild and attach to its release (empty: build only)"
+        required: false
+        default: ""
+      skip_tests:
+        description: "Skip the tests (only to rebuild a tag whose tests already passed elsewhere)"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -29,6 +42,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Rust toolchain
         run: rustup show active-toolchain || rustup toolchain install
@@ -47,6 +62,7 @@ jobs:
             libzstd-dev pkg-config
 
       - name: Test core crates
+        if: ${{ !inputs.skip_tests }}
         run: cargo test -p vigia-i18n -p vigia-core -p vigia-cli
 
       - name: Build (macOS universal .app)
@@ -89,15 +105,25 @@ jobs:
           path: dist/*
 
   release:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.tag != '')
     needs: build
     runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*
-          generate_release_notes: true
+      - name: Checksums
+        working-directory: dist
+        run: for f in *; do sha256sum "$f" > "$f.sha256"; done
+      - name: Create the release, or add these files to it
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            gh release create "$TAG" dist/* --verify-tag --generate-notes
+          fi
