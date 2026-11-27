@@ -213,7 +213,7 @@ impl VigiaApp {
                 w2.update(cx, |this, cx| this.ask_delete_entity(id, cx)).ok();
             }))
         });
-        let mut facts = div().flex().flex_wrap().gap(px(16.)).text_size(px(12.5));
+        let mut facts = div().flex().flex_wrap().gap(px(16.)).text_size(px(13.));
         let fact = |label: String, v: String| div().flex().flex_col().gap(px(1.)).child(div().text_size(px(11.)).text_color(t.ink_muted).child(label)).child(div().child(v));
         if let Some(l) = e.kind.ident_label().filter(|_| !e.ident.is_empty()) {
             facts = facts.child(fact(l, e.shown_ident()));
@@ -234,7 +234,7 @@ impl VigiaApp {
             .items_center()
             .gap(px(12.))
             .child(div().flex().items_center().justify_center().size(px(44.)).rounded_full().border_2().border_color(worst.map(|s| t.status(s)).unwrap_or(t.border)).bg(t.surface).child(ui::entity_icon(e.kind, 22., t.accent)))
-            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).child(div().flex().gap(px(6.)).child(ui::chip(e.kind.label(), t.accent, 11.5)).child(ui::chip(i18n::tn!("app.items.count", live.len()), t.ink_muted, 11.5)).when(e.archived, |d| d.child(ui::chip(i18n::t!("app.state.archived"), t.ink_muted, 11.5)))))
+            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).child(div().flex().gap(px(6.)).child(ui::chip(e.kind.label(), t.accent, 11.)).child(ui::chip(i18n::tn!("app.items.count", live.len()), t.ink_muted, 11.)).when(e.archived, |d| d.child(ui::chip(i18n::t!("app.state.archived"), t.ink_muted, 11.)))))
             .child(ui::outline_button(t, "ent-new").child(icon(IconName::Plus, 14., t.ink)).child(i18n::t!("app.entity.add_item")).on_click(cx.listener(move |this, _, window, cx| {
                 let e = this.data.read(cx).entity(id).cloned();
                 this.start_new_for(e.as_ref(), window, cx);
@@ -248,7 +248,7 @@ impl VigiaApp {
             .child(more);
         let mut col = div().id("entity-page").flex().flex_col().size_full().overflow_y_scroll().px(px(28.)).py(px(22.)).gap(px(10.)).child(head).child(facts);
         if !e.notes.is_empty() {
-            col = col.child(div().text_size(px(12.5)).text_color(t.ink_muted).child(e.notes.clone()));
+            col = col.child(div().text_size(px(13.)).text_color(t.ink_muted).child(e.notes.clone()));
         }
         // counts by urgency
         let mut stats = div().flex().flex_wrap().gap(px(6.));
@@ -373,8 +373,8 @@ impl VigiaApp {
                     .rounded(px(7.))
                     .cursor_pointer()
                     .child(div().size(px(8.)).rounded_full().bg(color))
-                    .child(div().w(px(170.)).flex_none().text_size(px(12.5)).child(it.due_date(today).map(long_date).unwrap_or_default()))
-                    .child(div().flex_1().min_w_0().truncate().text_size(px(12.5)).child(it.name.clone()))
+                    .child(div().w(px(170.)).flex_none().text_size(px(13.)).child(it.due_date(today).map(long_date).unwrap_or_default()))
+                    .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).child(it.name.clone()))
                     .child(div().text_size(px(12.)).text_color(color).child(days_text(it.days_left(today))))
                     .on_click(cx.listener(move |this, _, _, cx| this.select(iid, cx)))
             };
@@ -417,8 +417,8 @@ impl VigiaApp {
                     .cursor_pointer()
                     .hover(move |s| s.bg(hover))
                     .child(icon(IconName::File, 13., t.ink_muted))
-                    .child(div().flex_1().min_w_0().truncate().text_size(px(12.5)).child(a.name.clone()))
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(item_name.clone()))
+                    .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).child(a.name.clone()))
+                    .child(div().text_size(px(12.)).text_color(t.ink_muted).child(item_name.clone()))
                     .on_click(move |_, _, cx| cx.open_with_system(&path)),
             );
         }
@@ -427,7 +427,7 @@ impl VigiaApp {
 
     pub fn render_entity_form(&self, t: &Tokens, cx: &mut Context<Self>) -> Stateful<Div> {
         let f = self.entity_edit.as_ref().expect("entity form");
-        let label = |s: String| div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(t.ink_muted).child(s);
+        let label = |s: String| div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(t.ink_muted).child(s);
         let field = |s: String, e: &Entity<InputState>| div().flex().flex_col().gap(px(3.)).child(label(s)).child(Input::new(e).small());
         let weak = cx.entity().downgrade();
         let cur = f.kind;

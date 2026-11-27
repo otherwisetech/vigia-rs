@@ -429,7 +429,7 @@ impl VigiaApp {
                 cx.notify();
             }))))
             .child(div().flex_1())
-            .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(i18n::t!("app.graph.hint")))
+            .child(div().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.graph.hint")))
             .child(Button::new("g-zoom-out").outline().small().icon(IconName::Minus).on_click(cx.listener(|this, _, _, cx| {
                 this.graph.zoom_by(1. / 1.2, None);
                 cx.notify();

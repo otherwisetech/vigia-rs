@@ -140,7 +140,7 @@ pub fn style(t: &Tokens) -> PanelStyle {
     PanelStyle {
         background: t.canvas,
         surface: t.surface,
-        raised: t.surface,
+        raised: t.raised,
         border: t.border,
         ink: t.ink,
         muted: t.ink_muted,
@@ -153,7 +153,7 @@ pub fn style(t: &Tokens) -> PanelStyle {
         note_soft: t.warn.opacity(0.14),
         terminal_bg: if t.dark { rgb(0x161514).into() } else { rgb(0xFFFFFF).into() },
         terminal_fg: t.ink,
-        mono_font: "Menlo".into(), // i18n-ok: font name
+        mono_font: otherwise_ui::tokens::MONO.into(),
         dark: t.dark,
     }
 }

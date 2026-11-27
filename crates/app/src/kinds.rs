@@ -159,14 +159,14 @@ impl VigiaApp {
             .items_center()
             .gap(px(12.))
             .child(div().flex().items_center().justify_center().size(px(44.)).rounded_full().bg(t.accent_soft).child(ui::entity_icon(kind, 22., t.accent)))
-            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).child(crate::entities::section_title_case(kind))).child(div().text_size(px(12.5)).text_color(t.ink_muted).child(blurb(kind))))
+            .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(20.)).font_weight(FontWeight::SEMIBOLD).child(crate::entities::section_title_case(kind))).child(div().text_size(px(13.)).text_color(t.ink_muted).child(blurb(kind))))
             .child(ui::filled_button(t, "kind-add", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(add_label(kind)).on_click(cx.listener(move |this, _, window, cx| this.start_new_entity(kind, window, cx))));
         let mut col = div().id("kind-page").flex().flex_col().size_full().overflow_y_scroll().px(px(28.)).py(px(22.)).gap(px(14.)).child(head);
         if !loose.is_empty() {
             col = col.child(self.loose_list(t, kind, &loose, cx));
         }
         if cards.is_empty() && !loose.is_empty() {
-            return col.child(div().text_size(px(12.5)).text_color(t.ink_muted).child(i18n::t!("app.kinds.loose_hint", kind = add_label(kind)))).child(self.template_chips(t, kind, None, &[], 0, 12, cx)).into_any_element();
+            return col.child(div().text_size(px(13.)).text_color(t.ink_muted).child(i18n::t!("app.kinds.loose_hint", kind = add_label(kind)))).child(self.template_chips(t, kind, None, &[], 0, 12, cx)).into_any_element();
         }
         if cards.is_empty() {
             col = col.child(
@@ -180,7 +180,7 @@ impl VigiaApp {
                     .border_color(t.border)
                     .bg(t.surface)
                     .child(div().text_size(px(14.)).font_weight(FontWeight::MEDIUM).child(i18n::t!("app.kinds.empty")))
-                    .child(div().text_size(px(12.5)).text_color(t.ink_muted).child(i18n::t!("app.kinds.empty_hint")))
+                    .child(div().text_size(px(13.)).text_color(t.ink_muted).child(i18n::t!("app.kinds.empty_hint")))
                     .child(self.template_chips(t, kind, None, &[], 0, 12, cx)),
             );
             return col.into_any_element();
@@ -200,8 +200,8 @@ impl VigiaApp {
                         .items_center()
                         .gap(px(8.))
                         .child(div().size(px(8.)).flex_none().rounded_full().bg(color))
-                        .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(12.5)).truncate().child(it.name.clone())).child(div().text_size(px(11.5)).text_color(t.ink_muted).child(it.due_date(today).map(long_date).unwrap_or_default())))
-                        .child(ui::chip(days_text(it.days_left(today)), color, 11.5))
+                        .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(13.)).truncate().child(it.name.clone())).child(div().text_size(px(12.)).text_color(t.ink_muted).child(it.due_date(today).map(long_date).unwrap_or_default())))
+                        .child(ui::chip(days_text(it.days_left(today)), color, 11.))
                 }
                 None => div().text_size(px(12.)).text_color(t.ink_muted).child(if c.items == 0 { i18n::t!("app.kinds.no_items") } else { i18n::t!("app.kinds.no_dates") }),
             };
@@ -229,7 +229,7 @@ impl VigiaApp {
                                     .items_center()
                                     .gap(px(10.))
                                     .child(div().flex().flex_none().items_center().justify_center().size(px(34.)).rounded_full().border_2().border_color(ring).child(ui::entity_icon(kind, 16., t.accent)))
-                                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).when(!sub.is_empty(), |d| d.child(div().text_size(px(11.5)).text_color(t.ink_muted).truncate().child(sub))))
+                                    .child(div().flex().flex_col().flex_1().min_w_0().child(div().text_size(px(14.)).font_weight(FontWeight::SEMIBOLD).truncate().child(e.name.clone())).when(!sub.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(t.ink_muted).truncate().child(sub))))
                                     .children(c.status.map(|s| ui::chip(s.label(), t.status(s), 11.)))
                                     .child(div().text_size(px(11.)).text_color(t.ink_muted).child(i18n::tn!("app.items.count", c.items))),
                             )
@@ -273,10 +273,10 @@ impl VigiaApp {
                             .flex_1()
                             .min_w_0()
                             .child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone()))
-                            .child(div().text_size(px(11.5)).text_color(t.ink_muted).truncate().child(if owners.is_empty() { i18n::t!("app.kinds.no_owner") } else { owners })),
+                            .child(div().text_size(px(12.)).text_color(t.ink_muted).truncate().child(if owners.is_empty() { i18n::t!("app.kinds.no_owner") } else { owners })),
                     )
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(it.due_date(today).map(long_date).unwrap_or_else(|| i18n::t!("app.days.none"))))
-                    .child(ui::chip(days_text(it.days_left(today)), color, 11.5))
+                    .child(div().text_size(px(12.)).text_color(t.ink_muted).child(it.due_date(today).map(long_date).unwrap_or_else(|| i18n::t!("app.days.none"))))
+                    .child(ui::chip(days_text(it.days_left(today)), color, 11.))
                     .on_click(cx.listener(move |this, _, _, cx| {
                         this.selected = Some(id);
                         this.edit = None;

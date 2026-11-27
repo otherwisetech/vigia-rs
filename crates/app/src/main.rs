@@ -31,8 +31,8 @@ use vigia_core::settings::Settings;
 actions!(vigia, [Quit, OpenWebsite, OpenVcity]);
 
 pub(crate) const APP_NAME: &str = "Vigía"; // i18n-ok: product name
-pub(crate) const COMPANY: &str = "Otherwise Technologies LLC"; // i18n-ok: company name
-pub(crate) const COMPANY_URL: &str = "https://otherwisetech.com";
+pub(crate) const COMPANY: &str = otherwise_ui::COMPANY;
+pub(crate) const COMPANY_URL: &str = otherwise_ui::COMPANY_URL;
 /// The invitation to Vcity (About and the Help menu).
 pub(crate) const VCITY_URL: &str = "https://vcity.io/?utm_source=vigia&utm_medium=app&utm_campaign=otherwise-apps";
 pub(crate) const REPO_URL: &str = "https://github.com/otherwisetech/vigia-rs";
@@ -137,11 +137,6 @@ pub(crate) const LOGO_SVG: &str = "icons/vigia-logo.svg";
 pub(crate) static ICON_PNG: &[u8] = include_bytes!("../assets/logo/vigia-icon-512.png");
 #[cfg(target_os = "macos")]
 static STATUS_PNG: &[u8] = include_bytes!("../assets/icons/vigia-status.png");
-static FONTS: [&[u8]; 3] = [
-    include_bytes!("../assets/fonts/Inter-Regular.ttf"),
-    include_bytes!("../assets/fonts/Inter-Medium.ttf"),
-    include_bytes!("../assets/fonts/Inter-SemiBold.ttf"),
-];
 
 /// Sets the Dock icon at runtime: covers `cargo run` (no bundle) and stale Dock icon caches.
 #[cfg(target_os = "macos")]
@@ -414,12 +409,10 @@ fn main() {
     application.on_open_urls(|urls| INBOUND_LINKS.lock().unwrap_or_else(|e| e.into_inner()).extend(urls));
     application.on_reopen(open_main_window);
     application.run(move |cx| {
-        if let Err(e) = cx.text_system().add_fonts(FONTS.iter().map(|f| Cow::Borrowed(*f)).collect()) {
-            eprintln!("fonts: {e}");
-        }
         #[cfg(target_os = "macos")]
         set_dock_icon();
         gpui_component::init(cx);
+        otherwise_ui::init(otherwise_ui::accents::VIGIA, cx);
         otherwise_agent_panel::ui::init(cx);
         assistant::sync_locale();
         cx.on_app_quit(|_| async { assistant::remove_live_dir() }).detach();
