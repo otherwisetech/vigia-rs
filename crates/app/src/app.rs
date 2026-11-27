@@ -9,7 +9,7 @@ use gpui::*;
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
-use gpui_component::{IconName, Sizable as _, Theme};
+use gpui_component::{IconName, Sizable as _};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -19,8 +19,8 @@ use vigia_core::settings::Settings;
 use vigia_core::view::Filter;
 
 pub(crate) const CONTEXT: &str = "VigiaApp";
-const TOAST_FOR: Duration = Duration::from_secs(5);
-pub const SIDEBAR_W: f32 = 210.;
+const TOAST_FOR: Duration = otherwise_ui::tokens::motion::TOAST;
+pub const SIDEBAR_W: f32 = otherwise_ui::tokens::size::SIDEBAR;
 
 actions!(
     vigia,
@@ -84,8 +84,7 @@ pub fn bind_keys(cx: &mut App) {
 }
 
 pub(crate) fn sync_theme(window: Option<&mut Window>, cx: &mut App) {
-    Theme::sync_system_appearance(window, cx);
-    Theme::global_mut(cx).font_family = SANS.into();
+    crate::theme::apply(window, cx);
 }
 
 fn system_locale() -> Option<String> {
@@ -673,7 +672,7 @@ impl VigiaApp {
         let current = i18n::locale();
         let weak = cx.entity().downgrade();
         let stars_on = crate::star::enabled(cx);
-        let lang = Button::new("lang").ghost().icon(IconName::Globe).with_size(px(34.)).tooltip(i18n::t!("common.language")).dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
+        let lang = Button::new("lang").ghost().icon(IconName::Globe).with_size(px(otherwise_ui::tokens::size::CONTROL)).tooltip(i18n::t!("common.language")).dropdown_menu_with_anchor(Anchor::TopRight, move |mut menu, _, _| {
             menu = menu.label(i18n::t!("common.language"));
             for (code, name) in i18n::available() {
                 let w = weak.clone();
@@ -704,36 +703,27 @@ impl VigiaApp {
             .w(px(520.))
             .min_w(px(200.))
             .flex_shrink(1.)
-            .h(px(34.))
+            .h(px(otherwise_ui::tokens::size::CONTROL))
             .pl(px(10.))
             .pr(px(4.))
-            .rounded(px(10.))
+            .rounded(px(otherwise_ui::tokens::radius::CONTROL))
             .border_1()
             .border_color(t.border)
             .bg(t.canvas)
             .child(icon(IconName::Plus, 14., t.accent))
             .child(div().flex_1().min_w_0().text_size(px(13.)).child(Input::new(&self.quick).appearance(false).small()))
             .children(preview.map(|p| deferred(div().absolute().top(px(38.)).left_0().right_0().px(px(10.)).py(px(6.)).rounded(px(8.)).bg(t.ink).text_color(t.on_fill()).text_size(px(12.)).child(p)).with_priority(1)));
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(10.))
-            .h(px(52.))
-            .px(px(12.))
-            .border_b_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .child(div().flex().flex_none().items_center().justify_center().size(px(30.)).rounded(px(8.)).bg(t.brand).child(ui::logo_mark(18., gpui::white())))
-            .child(div().flex_none().w(px(SIDEBAR_W - 52.)).text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::APP_NAME))
-            .child(quick)
-            .child(div().flex_1())
-            .when(self.ocr_busy, |d| d.child(div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(t.ink_muted).child(gpui_component::spinner::Spinner::new().small().color(t.accent)).child(i18n::t!("app.ocr.reading"))))
-            .child(ui::icon_button(t, "top-assistant", IconName::Bot, true).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.assistant.toggle")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.toggle_agent_panel(window, cx))))
-            .child(ui::outline_button(t, "top-ocr").child(icon(IconName::File, 15., t.ink)).child(i18n::t!("app.ocr.button")).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.ocr.tooltip")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.read_document_dialog(None, window, cx))))
-            .child(self.template_picker(cx))
-            .child(ui::filled_button(t, "top-new", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(i18n::t!("app.item.new_short")).on_click(cx.listener(|this, _, window, cx| this.new_item(window, cx))))
-            .child(lang)
+        let busy = self.ocr_busy.then(|| div().flex().items_center().gap(px(6.)).text_size(px(12.)).text_color(t.ink_muted).child(gpui_component::spinner::Spinner::new().small().color(t.accent)).child(i18n::t!("app.ocr.reading")));
+        let mut header = otherwise_ui::AppHeader::new(otherwise_ui::logo_mark(crate::LOGO_SVG), crate::APP_NAME).center(quick);
+        if let Some(b) = busy {
+            header = header.action(b);
+        }
+        header
+            .action(ui::outline_button(t, "top-ocr").child(icon(IconName::File, 15., t.ink)).child(i18n::t!("app.ocr.button")).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.ocr.tooltip")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.read_document_dialog(None, window, cx))))
+            .action(self.template_picker(cx))
+            .action(ui::filled_button(t, "top-new", t.accent).child(icon(IconName::Plus, 15., t.on_fill())).child(i18n::t!("app.item.new_short")).on_click(cx.listener(|this, _, window, cx| this.new_item(window, cx))))
+            .action(ui::icon_button(t, "top-assistant", IconName::Bot, true).tooltip(|w, cx| gpui_component::tooltip::Tooltip::new(i18n::t!("app.assistant.toggle")).build(w, cx)).on_click(cx.listener(|this, _, window, cx| this.toggle_agent_panel(window, cx))))
+            .action(lang)
     }
 
     fn render_sidebar(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
@@ -755,12 +745,12 @@ impl VigiaApp {
                 .flex()
                 .items_center()
                 .gap(px(9.))
-                .h(px(32.))
+                .h(px(otherwise_ui::tokens::size::NAV_ITEM))
                 .px(px(10.))
-                .rounded(px(8.))
+                .rounded(px(otherwise_ui::tokens::radius::CONTROL))
                 .text_size(px(13.))
                 .cursor_pointer()
-                .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
+                .when(on, |d| d.bg(t.accent_soft).text_color(t.accent).font_weight(FontWeight::SEMIBOLD))
                 .when(!on, |d| d.hover(move |s| s.bg(hover)))
                 .child(icon(ic, 15., if on { t.accent } else { t.ink_muted }))
                 .child(div().flex_1().child(label))
@@ -778,8 +768,8 @@ impl VigiaApp {
                 .gap(px(8.))
                 .h(px(28.))
                 .px(px(10.))
-                .rounded(px(7.))
-                .text_size(px(12.5))
+                .rounded(px(otherwise_ui::tokens::radius::CONTROL))
+                .text_size(px(otherwise_ui::tokens::text::SMALL))
                 .cursor_pointer()
                 .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
                 .when(!on, |d| d.hover(move |s| s.bg(hover)))
@@ -793,17 +783,12 @@ impl VigiaApp {
         };
         let v = self.view;
         let mut side = div()
-            .id("sidebar")
+            .id("sidebar-items")
             .flex()
             .flex_col()
-            .flex_none()
-            .w(px(SIDEBAR_W))
-            .h_full()
+            .flex_1()
+            .min_h_0()
             .gap(px(2.))
-            .p(px(10.))
-            .border_r_1()
-            .border_color(t.border)
-            .bg(t.surface)
             .overflow_y_scroll()
             .child(nav("nav-dash", IconName::LayoutDashboard, i18n::t!("app.view.dashboard"), View::Dashboard, Some((counts.attention(), t.warn)), v == View::Dashboard))
             .child(nav("nav-time", IconName::Map, i18n::t!("app.view.timeline"), View::Timeline, None, v == View::Timeline))
@@ -816,12 +801,12 @@ impl VigiaApp {
                     .flex()
                     .items_center()
                     .gap(px(9.))
-                    .h(px(32.))
+                    .h(px(otherwise_ui::tokens::size::NAV_ITEM))
                     .px(px(10.))
-                    .rounded(px(8.))
+                    .rounded(px(otherwise_ui::tokens::radius::CONTROL))
                     .text_size(px(13.))
                     .cursor_pointer()
-                    .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
+                    .when(on, |d| d.bg(t.accent_soft).text_color(t.accent).font_weight(FontWeight::SEMIBOLD))
                     .when(!on, |d| d.hover(move |s| s.bg(hover)))
                     .child(ui::svg_icon(ui::GRAPH_SVG, 15., if on { t.accent } else { t.ink_muted }))
                     .child(div().flex_1().child(i18n::t!("app.view.graph")))
@@ -838,7 +823,7 @@ impl VigiaApp {
                 .mt(px(10.))
                 .h(px(26.))
                 .px(px(10.))
-                .rounded(px(7.))
+                .rounded(px(otherwise_ui::tokens::radius::CONTROL))
                 .cursor_pointer()
                 .when(kind_on, |d| d.bg(t.accent_soft))
                 .when(!kind_on, |d| d.hover(move |s| s.bg(hover)))
@@ -862,8 +847,8 @@ impl VigiaApp {
                         .gap(px(8.))
                         .h(px(28.))
                         .px(px(10.))
-                        .rounded(px(7.))
-                        .text_size(px(12.5))
+                        .rounded(px(otherwise_ui::tokens::radius::CONTROL))
+                        .text_size(px(otherwise_ui::tokens::text::SMALL))
                         .text_color(t.ink_muted)
                         .cursor_pointer()
                         .when(!on, |d| d.hover(move |s| s.bg(hover)))
@@ -886,8 +871,8 @@ impl VigiaApp {
                         .gap(px(8.))
                         .h(px(28.))
                         .px(px(10.))
-                        .rounded(px(7.))
-                        .text_size(px(12.5))
+                        .rounded(px(otherwise_ui::tokens::radius::CONTROL))
+                        .text_size(px(otherwise_ui::tokens::text::SMALL))
                         .cursor_pointer()
                         .when(on, |d| d.bg(t.accent_soft).font_weight(FontWeight::SEMIBOLD))
                         .when(!on, |d| d.hover(move |s| s.bg(hover)))
@@ -906,7 +891,20 @@ impl VigiaApp {
                 side = side.child(filter_row(("cat", c as usize).into(), c.label(), n, on, Box::new(move |f| *f = Filter { category: Some(c), ..Default::default() })));
             }
         }
-        side
+        div()
+            .id("sidebar")
+            .flex()
+            .flex_col()
+            .flex_none()
+            .w(px(SIDEBAR_W))
+            .h_full()
+            .gap(px(otherwise_ui::tokens::space::S4))
+            .p(px(10.))
+            .border_r_1()
+            .border_color(t.border)
+            .bg(t.surface)
+            .child(side)
+            .child(otherwise_ui::privacy_note(t, i18n::t!("app.privacy.local"), None))
     }
 
     fn render_failed(&self, t: &Tokens, message: &str, cx: &mut Context<Self>) -> impl IntoElement {
@@ -945,93 +943,34 @@ impl VigiaApp {
         let note = self.storage_note(cx);
         let read_only = d.read_only();
         let checking = d.checking.len();
-        let ink = t.ink;
-        div()
-            .flex()
-            .flex_none()
-            .items_center()
-            .gap(px(12.))
-            .h(px(26.))
-            .px(px(12.))
-            .border_t_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .text_size(px(11.))
-            .text_color(t.ink_muted)
-            .child(div().flex_1().min_w_0().truncate().child(left))
-            .children(note.map(|(n, warn)| div().flex_none().text_color(if warn { t.danger } else { t.ink_muted }).child(n)))
-            .when(read_only, |d| d.child(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(t.danger).child(i18n::t!("app.db.read_only_badge"))))
-            .when(checking > 0, |d| d.child(i18n::tn!("app.check.running", checking)))
-            .child(crate::star::footer_link(t, cx))
-            .child(
-                div()
-                    .id("footer-about")
-                    .flex_none()
-                    .cursor_pointer()
-                    .hover(move |s| s.text_color(ink).underline())
-                    .child(i18n::t!("app.about.footer", app = crate::APP_NAME, version = crate::VERSION, company = crate::COMPANY))
-                    .on_click(cx.listener(|this, _, _, cx| this.show_about(cx))),
-            )
+        let mut footer = otherwise_ui::AppFooter::new(crate::APP_NAME, i18n::t!("app.about.footer_link")).version(crate::VERSION).status(div().truncate().child(left));
+        if let Some((n, warn)) = note {
+            footer = footer.item(div().flex_none().text_color(if warn { t.danger } else { t.ink_muted }).child(n));
+        }
+        if read_only {
+            footer = footer.item(div().flex_none().font_weight(FontWeight::MEDIUM).text_color(t.danger).child(i18n::t!("app.db.read_only_badge")));
+        }
+        if checking > 0 {
+            footer = footer.item(div().flex_none().child(i18n::tn!("app.check.running", checking)));
+        }
+        footer.item(crate::star::footer_link(t, cx)).on_about(cx.listener(|this, _, _, cx| this.show_about(cx)))
     }
 
     fn render_about(&self, t: &Tokens, cx: &mut Context<Self>) -> impl IntoElement {
-        let accent = t.accent;
-        let card = div()
-            .id("about-card")
-            .relative()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(12.))
-            .w(px(420.))
-            .px(px(32.))
-            .pt(px(32.))
-            .pb(px(26.))
-            .rounded(px(18.))
-            .border_1()
-            .border_color(t.border)
-            .bg(t.surface)
-            .shadow_lg()
-            // clicks inside the card must not reach the backdrop
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(div().absolute().top(px(10.)).right(px(10.)).child(ui::icon_button(t, "about-close", IconName::Close, true).on_click(cx.listener(|this, _, _, cx| {
+        let links = div().flex().items_center().gap(px(14.)).child(otherwise_ui::link(t, "about-source").text_size(px(otherwise_ui::tokens::text::SMALL)).child(i18n::t!("app.about.source")).on_click(|_, _, cx| cx.open_url(crate::REPO_URL))).child(crate::star::about_button(t, cx));
+        otherwise_ui::AboutModal::new(crate::APP_NAME, crate::VERSION, i18n::t!("app.about.by", company = crate::COMPANY))
+            .logo(self.logo.clone())
+            .description(i18n::t!("app.about.description"))
+            .place(i18n::t!("app.about.place"))
+            .website(i18n::t!("app.about.visit"), crate::COMPANY_URL)
+            .vcity(i18n::t!("app.vcity.invite"), i18n::t!("app.vcity.menu"), crate::VCITY_URL)
+            .extra(links)
+            .extra(crate::star::about_ask(t))
+            .license(i18n::t!("app.about.license"))
+            .on_dismiss(cx.listener(|this, _: &otherwise_ui::Dismiss, _, cx| {
                 this.about = false;
                 cx.notify();
-            }))))
-            .child(img(self.logo.clone()).size(px(88.)))
-            .child(div().flex().items_baseline().gap(px(8.)).child(div().text_size(px(22.)).font_weight(FontWeight::SEMIBOLD).child(crate::APP_NAME)).child(div().text_size(px(13.)).text_color(t.ink_muted).child(crate::VERSION)))
-            .child(div().text_center().text_size(px(13.)).line_height(px(19.)).text_color(t.ink_muted).child(i18n::t!("app.about.description")))
-            .child(div().w_full().h(px(1.)).my(px(4.)).bg(t.border))
-            .child(div().flex().flex_col().items_center().gap(px(2.)).child(div().text_size(px(13.)).child(i18n::t!("app.about.by", company = crate::COMPANY))).child(div().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.about.place"))))
-            .child(ui::filled_button(t, "about-site", t.accent).mt(px(4.)).child(i18n::t!("app.about.visit")).on_click(|_, _, cx| cx.open_url(crate::COMPANY_URL)))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(px(4.))
-                    .child(div().text_center().text_size(px(12.)).line_height(px(17.)).text_color(t.ink_muted).child(i18n::t!("app.vcity.invite")))
-                    .child(div().id("about-vcity").text_size(px(12.)).text_color(accent).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.vcity.menu")).on_click(|_, _, cx| cx.open_url(crate::VCITY_URL))),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(14.))
-                    .child(div().id("about-source").text_size(px(12.)).text_color(accent).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.about.source")).on_click(|_, _, cx| cx.open_url(crate::REPO_URL)))
-                    .child(crate::star::about_button(t, cx)),
-            )
-            .child(crate::star::about_ask(t))
-            .child(div().text_size(px(11.)).text_color(t.ink_muted).child(i18n::t!("app.about.license")));
-        ui::backdrop(t, "about-backdrop")
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|this, _, _, cx| {
-                    this.about = false;
-                    cx.notify();
-                }),
-            )
-            .child(card)
+            }))
     }
 
     fn render_toast(&self, t: &Tokens, cx: &mut Context<Self>) -> Option<impl IntoElement> {
@@ -1039,7 +978,7 @@ impl VigiaApp {
         let undo = (self.toast_undo && self.agent.last.is_some()).then(|| {
             div().id("toast-undo").text_size(px(13.)).font_weight(FontWeight::SEMIBOLD).text_color(t.accent_soft).cursor_pointer().hover(|s| s.underline()).child(i18n::t!("app.assistant.undo")).on_click(cx.listener(|this, _, _, cx| this.undo_last_proposal(cx)))
         });
-        Some(div().absolute().bottom(px(36.)).left_0().right_0().flex().justify_center().child(div().flex().items_center().gap(px(14.)).max_w(px(720.)).px(px(16.)).py(px(10.)).rounded(px(12.)).bg(t.ink).text_color(t.on_fill()).text_size(px(13.)).child(text.clone()).children(undo)))
+        Some(div().absolute().bottom(px(36.)).left_0().right_0().flex().justify_center().child(otherwise_ui::toast(t, text.clone()).gap(px(14.)).max_w(px(720.)).children(undo)))
     }
 
     pub fn selected_item(&self, cx: &App) -> Option<Item> {

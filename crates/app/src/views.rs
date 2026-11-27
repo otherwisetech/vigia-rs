@@ -227,11 +227,11 @@ impl VigiaApp {
                     .flex_1()
                     .min_w_0()
                     .py(px(6.))
-                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.5)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!owners.is_empty(), |d| d.child(div().flex().items_center().gap(px(4.)).min_w_0().text_size(px(12.5)).text_color(t.ink_muted).child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 11., t.ink_muted)).child(div().truncate().child(owners)))))
-                    .child(div().flex().items_center().gap(px(5.)).text_size(px(11.5)).text_color(t.ink_muted).child(crate::icons::kind_icon(it.kind, 11., t.ink_muted)).child(div().truncate().child(sub))),
+                    .child(div().flex().items_center().gap(px(6.)).min_w_0().child(div().text_size(px(13.)).font_weight(FontWeight::MEDIUM).truncate().child(it.name.clone())).when(!owners.is_empty(), |d| d.child(div().flex().items_center().gap(px(4.)).min_w_0().text_size(px(13.)).text_color(t.ink_muted).child(ui::entity_icon(it.owner_kind.unwrap_or_default(), 11., t.ink_muted)).child(div().truncate().child(owners)))))
+                    .child(div().flex().items_center().gap(px(5.)).text_size(px(12.)).text_color(t.ink_muted).child(crate::icons::kind_icon(it.kind, 11., t.ink_muted)).child(div().truncate().child(sub))),
             )
             .child(badges)
-            .child(div().flex().flex_col().items_end().flex_none().child(div().text_size(px(12.5)).child(due.map(long_date).unwrap_or_else(|| i18n::t!("app.days.none")))).child(div().text_size(px(11.5)).font_weight(FontWeight::MEDIUM).text_color(color).child(days_text(it.days_left(today)))))
+            .child(div().flex().flex_col().items_end().flex_none().child(div().text_size(px(13.)).child(due.map(long_date).unwrap_or_else(|| i18n::t!("app.days.none")))).child(div().text_size(px(12.)).font_weight(FontWeight::MEDIUM).text_color(color).child(days_text(it.days_left(today)))))
             .on_click(cx.listener(move |this, _, _, cx| this.select(id, cx)))
     }
 
@@ -244,7 +244,7 @@ impl VigiaApp {
     }
 
     fn render_empty(&self, t: &Tokens, cx: &mut Context<Self>) -> Stateful<Div> {
-        let example = |s: String| div().px(px(10.)).py(px(5.)).rounded(px(8.)).bg(t.surface).border_1().border_color(t.border).text_size(px(12.5)).child(s);
+        let example = |s: String| div().px(px(10.)).py(px(5.)).rounded(px(8.)).bg(t.surface).border_1().border_color(t.border).text_size(px(13.)).child(s);
         div()
             .id("empty")
             .flex()
@@ -266,7 +266,7 @@ impl VigiaApp {
                     .child(ui::outline_button(t, "first-ocr").child(icon(IconName::File, 15., t.ink)).child(i18n::t!("app.ocr.button")).on_click(cx.listener(|this, _, window, cx| this.read_document_dialog(None, window, cx))))
                     .child(ui::outline_button(t, "first-csv").child(icon(IconName::FolderOpen, 15., t.ink)).child(i18n::t!("app.menu.import_csv")).on_click(cx.listener(|_, _, window, cx| window.dispatch_action(Box::new(crate::app::ImportCsv), cx)))),
             )
-            .child(div().max_w(px(540.)).text_center().text_size(px(11.5)).line_height(px(16.)).text_color(t.ink_muted).child(i18n::t!("app.welcome.privacy")))
+            .child(div().max_w(px(540.)).text_center().text_size(px(12.)).line_height(px(16.)).text_color(t.ink_muted).child(i18n::t!("app.welcome.privacy")))
     }
 
     pub fn render_dashboard(&self, t: &Tokens, cx: &mut Context<Self>) -> AnyElement {
@@ -293,7 +293,7 @@ impl VigiaApp {
                 .cursor_pointer()
                 .hover(move |st| st.border_color(hover))
                 .child(div().text_size(px(28.)).font_weight(FontWeight::SEMIBOLD).text_color(if n == 0 { t.ink_muted } else { color }).child(n.to_string()))
-                .child(div().flex().items_center().gap(px(6.)).child(div().size(px(8.)).rounded_full().bg(color)).child(div().text_size(px(12.5)).text_color(t.ink_muted).child(label)))
+                .child(div().flex().items_center().gap(px(6.)).child(div().size(px(8.)).rounded_full().bg(color)).child(div().text_size(px(13.)).text_color(t.ink_muted).child(label)))
                 .on_click(cx.listener(move |this, _, _, cx| this.status_filter(s, cx)))
         };
         let next = vigia_core::view::next(&items, today, 5);
@@ -335,7 +335,7 @@ impl VigiaApp {
                         .cursor_pointer()
                         .hover(move |s| s.bg(hover))
                         .child(icon(IconName::Bell, 13., t.ink_muted))
-                        .child(div().w(px(150.)).flex_none().text_size(px(12.5)).text_color(t.ink_muted).child(when))
+                        .child(div().w(px(150.)).flex_none().text_size(px(13.)).text_color(t.ink_muted).child(when))
                         .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).child(it.title()))
                         .child(div().text_size(px(12.)).text_color(t.ink_muted).child(what))
                         .on_click(cx.listener(move |this, _, _, cx| this.select(id, cx))),
@@ -347,7 +347,7 @@ impl VigiaApp {
             col = col.child(div().pt(px(12.)).child(ui::section_title(t, i18n::t!("app.dash.sent"))));
             for (k, (id, title, body)) in recent.into_iter().take(6).enumerate() {
                 let hover = t.canvas;
-                col = col.child(div().id(("sent", k)).flex().gap(px(10.)).px(px(10.)).py(px(5.)).rounded(px(8.)).cursor_pointer().hover(move |s| s.bg(hover)).child(icon(IconName::CircleCheck, 13., t.ok)).child(div().text_size(px(13.)).child(title)).child(div().text_size(px(12.5)).text_color(t.ink_muted).child(body)).on_click(cx.listener(move |this, _, _, cx| this.select(id, cx))));
+                col = col.child(div().id(("sent", k)).flex().gap(px(10.)).px(px(10.)).py(px(5.)).rounded(px(8.)).cursor_pointer().hover(move |s| s.bg(hover)).child(icon(IconName::CircleCheck, 13., t.ok)).child(div().text_size(px(13.)).child(title)).child(div().text_size(px(13.)).text_color(t.ink_muted).child(body)).on_click(cx.listener(move |this, _, _, cx| this.select(id, cx))));
             }
         }
         let checked: Vec<&Item> = items.iter().filter(|i| i.auto_check && i.kind.checkable()).collect();
@@ -404,7 +404,7 @@ impl VigiaApp {
             let end = date::add_months(month.start, 1);
             let in_month: Vec<String> = marks.iter().filter(|(d, _)| **d >= month.start && **d < end).flat_map(|(d, v)| v.iter().map(move |(name, _)| i18n::t!("app.timeline.day_mark", day = d.day(), name = name.clone()))).collect();
             if !in_month.is_empty() {
-                col = col.child(div().flex().flex_wrap().gap_x(px(12.)).gap_y(px(2.)).text_size(px(11.5)).text_color(t.ink_muted).children(in_month.into_iter().map(|m| div().child(m))));
+                col = col.child(div().flex().flex_wrap().gap_x(px(12.)).gap_y(px(2.)).text_size(px(12.)).text_color(t.ink_muted).children(in_month.into_iter().map(|m| div().child(m))));
             }
             for (k, it) in month.items.iter().enumerate() {
                 let d = it.due_date(today).unwrap_or(today);
@@ -446,7 +446,7 @@ impl VigiaApp {
             })))
             .child(nav("cal-next", IconName::ChevronRight, 1));
         let mut weeks = div().flex().flex_col().flex_1().min_h_0().border_l_1().border_t_1().border_color(t.border).rounded(px(10.)).overflow_hidden();
-        weeks = weeks.child(div().flex().children((0..7).map(|i| div().flex_1().py(px(6.)).px(px(8.)).border_r_1().border_b_1().border_color(t.border).bg(t.surface).text_size(px(11.5)).font_weight(FontWeight::SEMIBOLD).text_color(t.ink_muted).child(weekday(i)))));
+        weeks = weeks.child(div().flex().children((0..7).map(|i| div().flex_1().py(px(6.)).px(px(8.)).border_r_1().border_b_1().border_color(t.border).bg(t.surface).text_size(px(12.)).font_weight(FontWeight::SEMIBOLD).text_color(t.ink_muted).child(weekday(i)))));
         for w in 0..6 {
             let mut row = div().flex().flex_1().min_h(px(84.));
             for d in 0..7 {

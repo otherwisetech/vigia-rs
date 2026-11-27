@@ -203,12 +203,12 @@ impl VigiaApp {
                     .child(text(i18n::t!("app.renew.body", name = it.title(), date = it.end_date(today).map(long_date).unwrap_or_else(|| i18n::t!("app.days.none")))))
                     .child(label(i18n::t!("app.renew.new_expiry")))
                     .child(Input::new(expires))
-                    .child(div().text_size(px(11.5)).text_color(if parsed.is_some() { t.ink_muted } else { t.danger }).child(match parsed {
+                    .child(div().text_size(px(12.)).text_color(if parsed.is_some() { t.ink_muted } else { t.danger }).child(match parsed {
                         Some(d) => i18n::t!("app.renew.suggested", date = long_date(d), rule = it.recurrence.label()),
                         None => i18n::t!("app.edit.bad_date", value = v),
                     }))
                     .child(div().flex().gap(px(8.)).child(div().flex_1().flex().flex_col().gap(px(4.)).child(label(i18n::t!("app.field.cost"))).child(Input::new(cost))).child(div().flex_1().flex().flex_col().gap(px(4.)).child(label(i18n::t!("app.renew.note"))).child(Input::new(note))))
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(i18n::t!("app.renew.history")));
+                    .child(div().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.renew.history")));
                 (i18n::t!("app.renew.title"), b.into_any_element(), i18n::t!("app.renew.ok"), false, |this, _, cx| this.submit_renew(cx))
             }
             Dialog::Delete { name, .. } => (i18n::t!("app.delete.title"), text(i18n::t!("app.delete.body", name = name.clone())).into_any_element(), i18n::t!("app.item.delete"), true, |this, _, cx| {
@@ -250,7 +250,7 @@ impl VigiaApp {
                 })
             }
             Dialog::Ocr { path, target, ex, text: raw } => {
-                let row = |l: String, v: Option<String>| div().flex().gap(px(10.)).child(div().w(px(130.)).text_size(px(12.5)).text_color(t.ink_muted).child(l)).child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(v.unwrap_or_else(|| i18n::t!("app.ocr.not_found"))));
+                let row = |l: String, v: Option<String>| div().flex().gap(px(10.)).child(div().w(px(130.)).text_size(px(13.)).text_color(t.ink_muted).child(l)).child(div().flex_1().text_size(px(13.)).font_weight(FontWeight::MEDIUM).child(v.unwrap_or_else(|| i18n::t!("app.ocr.not_found"))));
                 let found = ex.expires.is_some() || ex.number.is_some() || ex.issued.is_some();
                 let b = div()
                     .flex()
@@ -262,14 +262,14 @@ impl VigiaApp {
                     .child(row(i18n::t!("app.field.issued"), ex.issued.map(long_date)))
                     .child(row(i18n::t!("app.field.reference"), ex.number.clone()))
                     .when(ex.holder.is_some(), |d| d.child(row(i18n::t!("app.field.owner"), ex.holder.clone())))
-                    .when(!found, |d| d.child(div().text_size(px(12.5)).text_color(t.warn).child(i18n::t!("app.ocr.nothing"))))
+                    .when(!found, |d| d.child(div().text_size(px(13.)).text_color(t.warn).child(i18n::t!("app.ocr.nothing"))))
                     .child(div().id("ocr-text").max_h(px(140.)).overflow_y_scroll().p(px(8.)).rounded(px(6.)).bg(t.canvas).text_size(px(11.)).text_color(t.ink_muted).child(if raw.trim().is_empty() { i18n::t!("app.ocr.no_text") } else { raw.chars().take(2000).collect::<String>() }))
-                    .child(div().text_size(px(11.5)).text_color(t.ink_muted).child(i18n::t!("app.ocr.local")));
+                    .child(div().text_size(px(12.)).text_color(t.ink_muted).child(i18n::t!("app.ocr.local")));
                 let ok = if target.is_some() { i18n::t!("app.ocr.apply") } else { i18n::t!("app.ocr.create") };
                 (i18n::t!("app.ocr.title"), b.into_any_element(), ok, false, |this, window, cx| this.apply_ocr(window, cx))
             }
             Dialog::Settings(f) => {
-                let hint = |s: String| div().text_size(px(11.5)).line_height(px(16.)).text_color(t.ink_muted).child(s);
+                let hint = |s: String| div().text_size(px(12.)).line_height(px(16.)).text_color(t.ink_muted).child(s);
                 let check = |id: &'static str, l: String, on: bool, set: fn(&mut SettingsForm, bool)| {
                     Checkbox::new(id).small().label(l).checked(on).on_click(cx.listener(move |this, v: &bool, _, cx| {
                         if let Some(Dialog::Settings(f)) = this.dialog.as_mut() {
@@ -322,7 +322,7 @@ impl VigiaApp {
                     .child(check("set-today", i18n::t!("app.settings.today"), f.today, |f, v| f.today = v))
                     .child(hint(if otherwise_link::settings::HubSettings::load(&otherwise_link::Root::system()).entities { i18n::t!("app.settings.registry_on") } else { i18n::t!("app.settings.registry_off") }))
                     .child(ui::section_title(t, i18n::t!("app.settings.ocr")))
-                    .child(div().flex().items_center().gap(px(8.)).child(icon(if models { IconName::CircleCheck } else { IconName::Info }, 14., if models { t.ok } else { t.ink_muted })).child(div().text_size(px(12.5)).child(if models { i18n::t!("app.settings.ocr_ready") } else { i18n::t!("app.settings.ocr_missing") })))
+                    .child(div().flex().items_center().gap(px(8.)).child(icon(if models { IconName::CircleCheck } else { IconName::Info }, 14., if models { t.ok } else { t.ink_muted })).child(div().text_size(px(13.)).child(if models { i18n::t!("app.settings.ocr_ready") } else { i18n::t!("app.settings.ocr_missing") })))
                     .child(hint(i18n::t!("app.ocr.models_privacy")))
                     .child(ui::section_title(t, i18n::t!("app.settings.other")))
                     .child(check("set-stars", i18n::t!("app.star.setting"), f.stars, |f, v| f.stars = v))

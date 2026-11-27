@@ -4817,6 +4817,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "otherwise-ui"
+version = "0.1.3"
+source = "git+https://github.com/otherwisetech/otherwise-ui?tag=v0.1.3#ade5fdae419d71719a454d91954eeeedc442320a"
+dependencies = [
+ "gpui",
+ "gpui-component",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7759,7 +7768,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vigia-app"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -7770,6 +7779,7 @@ dependencies = [
  "objc",
  "otherwise-agent-panel",
  "otherwise-link 0.5.0",
+ "otherwise-ui",
  "serde_json",
  "ureq",
  "uuid",
@@ -7780,7 +7790,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-cli"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "otherwise-link 0.5.0",
@@ -7792,7 +7802,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-core"
-version = "0.7.0"
+version = "0.7.1"
 dependencies = [
  "chrono",
  "image",
@@ -7813,7 +7823,7 @@ dependencies = [
 
 [[package]]
 name = "vigia-i18n"
-version = "0.7.0"
+version = "0.7.1"
 
 [[package]]
 name = "vswhom"
